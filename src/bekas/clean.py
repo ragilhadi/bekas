@@ -104,17 +104,18 @@ def _generic_remove(candidate: Candidate, ctx: Context, quarantine_enabled: bool
 
     if quarantine_enabled:
         try:
-            dest = move_to_quarantine(
-                run_id, p, candidate.category, candidate.size_bytes, candidate.metadata
-            )
+            dest = move_to_quarantine(run_id, p, candidate.category, candidate.size_bytes, candidate.metadata)
             return RemovalResult(
-                success=True, bytes_freed=candidate.size_bytes, undo_token=str(dest),
+                success=True,
+                bytes_freed=candidate.size_bytes,
+                undo_token=str(dest),
                 log="quarantined",
             )
         except Exception as exc:
             return RemovalResult(success=False, bytes_freed=0, log=str(exc))
 
     import shutil
+
     try:
         if p.is_dir():
             shutil.rmtree(p)

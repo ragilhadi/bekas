@@ -69,6 +69,7 @@ class _FakePlugin:
 
     def remove(self, candidate, ctx):
         from bekas.models import RemovalResult
+
         return RemovalResult(success=True, bytes_freed=candidate.size_bytes, log="deleted")
 
 

@@ -398,6 +398,7 @@ def tui_cmd() -> None:
     """Launch interactive TUI (Textual)."""
     try:
         from bekas.tui import TuiApp
+
         app = TuiApp()
         app.run()
     except Exception as exc:

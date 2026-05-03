@@ -155,7 +155,9 @@ class TestGitBranchesPlugin:
         # We can't easily back-date git commits without extra work,
         # but the commit is already just now, so let's hack by
         # making config require 0 days or setting min_idle_days=0
-        ctx = Context(dry_run=True, config={"git_repos": [str(repo)], "plugin_settings": {"git.branches": {"min_idle_days": 0}}})
+        ctx = Context(
+            dry_run=True, config={"git_repos": [str(repo)], "plugin_settings": {"git.branches": {"min_idle_days": 0}}}
+        )
         plugin = GitBranchesPlugin()
         cands = list(plugin.discover(ctx))
         branch_cands = [c for c in cands if c.metadata.get("branch") == "feature"]
@@ -184,12 +186,20 @@ class TestSafetyFilters:
     def test_excluded_paths_filtered(self):
         cands = [
             Candidate(
-                id="x", category="foo", size_bytes=1,
-                path_or_handle="/etc/passwd", confidence=Confidence.SAFE, reason="r",
+                id="x",
+                category="foo",
+                size_bytes=1,
+                path_or_handle="/etc/passwd",
+                confidence=Confidence.SAFE,
+                reason="r",
             ),
             Candidate(
-                id="y", category="foo", size_bytes=1,
-                path_or_handle="/tmp/ok", confidence=Confidence.SAFE, reason="r",
+                id="y",
+                category="foo",
+                size_bytes=1,
+                path_or_handle="/tmp/ok",
+                confidence=Confidence.SAFE,
+                reason="r",
             ),
         ]
         safe = filter_candidates(cands)

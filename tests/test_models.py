@@ -18,12 +18,20 @@ def test_candidate_creation():
 
 def test_plan_totals():
     c1 = Candidate(
-        id="a", category="foo", size_bytes=100, path_or_handle="/a",
-        confidence=Confidence.SAFE, reason="r",
+        id="a",
+        category="foo",
+        size_bytes=100,
+        path_or_handle="/a",
+        confidence=Confidence.SAFE,
+        reason="r",
     )
     c2 = Candidate(
-        id="b", category="bar", size_bytes=200, path_or_handle="/b",
-        confidence=Confidence.REVIEW, reason="r",
+        id="b",
+        category="bar",
+        size_bytes=200,
+        path_or_handle="/b",
+        confidence=Confidence.REVIEW,
+        reason="r",
     )
     plan = Plan(audit_id="ad_1", candidates=[c1, c2])
     assert plan.total_bytes() == 300

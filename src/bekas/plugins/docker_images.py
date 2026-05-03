@@ -51,8 +51,7 @@ class DockerImagesPlugin(Plugin):
                     if used_by_container:
                         cnames = _container_names_for_image(ctx, img_id)
                         reason_parts.append(
-                            f"Currently used by container(s): {', '.join(cnames)}. "
-                            "Remove the container first."
+                            f"Currently used by container(s): {', '.join(cnames)}. " "Remove the container first."
                         )
                         conf = Confidence.MANUAL
                     else:

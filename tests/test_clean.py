@@ -30,7 +30,9 @@ class FakePlugin(Plugin):
         return True
 
     def quarantine(self, candidate, ctx, quarantine_dir):
-        return RemovalResult(success=True, bytes_freed=candidate.size_bytes, undo_token="/quarantine/x", log="quarantined")
+        return RemovalResult(
+            success=True, bytes_freed=candidate.size_bytes, undo_token="/quarantine/x", log="quarantined"
+        )
 
 
 def test_find_plugin():
@@ -40,9 +42,15 @@ def test_find_plugin():
 
 
 def test_group_by_category():
-    c1 = Candidate(id="a", category="docker.image", size_bytes=0, path_or_handle="x", confidence=Confidence.SAFE, reason="r")
-    c2 = Candidate(id="b", category="docker.container", size_bytes=0, path_or_handle="y", confidence=Confidence.SAFE, reason="r")
-    c3 = Candidate(id="c", category="python.venv", size_bytes=0, path_or_handle="z", confidence=Confidence.SAFE, reason="r")
+    c1 = Candidate(
+        id="a", category="docker.image", size_bytes=0, path_or_handle="x", confidence=Confidence.SAFE, reason="r"
+    )
+    c2 = Candidate(
+        id="b", category="docker.container", size_bytes=0, path_or_handle="y", confidence=Confidence.SAFE, reason="r"
+    )
+    c3 = Candidate(
+        id="c", category="python.venv", size_bytes=0, path_or_handle="z", confidence=Confidence.SAFE, reason="r"
+    )
     groups = _group_by_category([c1, c2, c3])
     assert len(groups["docker"]) == 2
     assert len(groups["python"]) == 1
@@ -52,11 +60,18 @@ def test_human_size():
     assert _human_size(0) == "0.0 B"
     assert _human_size(1024) == "1.0 KB"
     assert _human_size(1024 * 1024) == "1.0 MB"
-    assert _human_size(1024 ** 5) == "1.0 PB"
+    assert _human_size(1024**5) == "1.0 PB"
 
 
 def test_apply_plan_dry_run():
-    c = Candidate(id="a", category="fake.test", size_bytes=100, path_or_handle="/tmp/fake", confidence=Confidence.SAFE, reason="reason")
+    c = Candidate(
+        id="a",
+        category="fake.test",
+        size_bytes=100,
+        path_or_handle="/tmp/fake",
+        confidence=Confidence.SAFE,
+        reason="reason",
+    )
     plan = Plan(audit_id="ad1", candidates=[c])
     ctx = Context(dry_run=True)
     plugin = FakePlugin()
@@ -71,7 +86,14 @@ def test_apply_plan_excluded_skipped(tmp_path: Path):
     # Create a file under /tmp that is NOT excluded
     safe_file = tmp_path / "safe.txt"
     safe_file.write_text("hello")
-    c = Candidate(id="a", category="fake.test", size_bytes=5, path_or_handle=str(safe_file), confidence=Confidence.SAFE, reason="r")
+    c = Candidate(
+        id="a",
+        category="fake.test",
+        size_bytes=5,
+        path_or_handle=str(safe_file),
+        confidence=Confidence.SAFE,
+        reason="r",
+    )
     plan = Plan(audit_id="ad1", candidates=[c])
     ctx = Context(dry_run=True)
     result = apply_plan(plan, [FakePlugin()], ctx)
@@ -102,7 +124,14 @@ def test_generic_remove_delete(tmp_path: Path):
 
 def test_apply_plan_quarantine_counts_bytes():
     """Quarantined items must always count toward total_freed."""
-    c = Candidate(id="a", category="fake.test", size_bytes=100, path_or_handle="/tmp/fake", confidence=Confidence.SAFE, reason="reason")
+    c = Candidate(
+        id="a",
+        category="fake.test",
+        size_bytes=100,
+        path_or_handle="/tmp/fake",
+        confidence=Confidence.SAFE,
+        reason="reason",
+    )
     plan = Plan(audit_id="ad1", candidates=[c])
     ctx = Context(dry_run=False)
     plugin = FakePlugin()
@@ -112,7 +141,14 @@ def test_apply_plan_quarantine_counts_bytes():
 
 def test_apply_plan_yes_all_skips_input():
     """With yes_all, per-category input should be skipped."""
-    c = Candidate(id="a", category="fake.test", size_bytes=100, path_or_handle="/tmp/fake", confidence=Confidence.SAFE, reason="reason")
+    c = Candidate(
+        id="a",
+        category="fake.test",
+        size_bytes=100,
+        path_or_handle="/tmp/fake",
+        confidence=Confidence.SAFE,
+        reason="reason",
+    )
     plan = Plan(audit_id="ad1", candidates=[c])
     ctx = Context(dry_run=False)
     plugin = FakePlugin()

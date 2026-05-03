@@ -50,6 +50,7 @@ class RustTargetPlugin(Plugin):
         try:
             size = _du(path)
             import shutil
+
             shutil.rmtree(path)
             return RemovalResult(success=True, bytes_freed=size, log="Deleted")
         except Exception as exc:

@@ -78,8 +78,12 @@ def test_very_long_path(tmp_path: Path) -> None:
 def test_safety_filters_candidates():
     """filter_candidates must drop excluded items."""
     candidates = [
-        Candidate(id="a", category="x", size_bytes=1, path_or_handle="/etc/passwd", confidence=Confidence.SAFE, reason="r"),
-        Candidate(id="b", category="x", size_bytes=2, path_or_handle="/tmp/safe", confidence=Confidence.SAFE, reason="r"),
+        Candidate(
+            id="a", category="x", size_bytes=1, path_or_handle="/etc/passwd", confidence=Confidence.SAFE, reason="r"
+        ),
+        Candidate(
+            id="b", category="x", size_bytes=2, path_or_handle="/tmp/safe", confidence=Confidence.SAFE, reason="r"
+        ),
     ]
     safe = filter_candidates(candidates)
     assert len(safe) == 1

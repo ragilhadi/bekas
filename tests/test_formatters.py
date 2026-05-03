@@ -13,13 +13,15 @@ def test_human_size():
     assert _human_size(0) == "0.0 B"
     assert _human_size(1024) == "1.0 KB"
     assert _human_size(1024 * 1024) == "1.0 MB"
-    assert _human_size(1024 ** 5) == "1.0 PB"
+    assert _human_size(1024**5) == "1.0 PB"
 
 
 def test_format_human_audit_report():
     from datetime import datetime
 
-    c = Candidate(id="a", category="docker.image", size_bytes=1000, path_or_handle="x", confidence=Confidence.SAFE, reason="r")
+    c = Candidate(
+        id="a", category="docker.image", size_bytes=1000, path_or_handle="x", confidence=Confidence.SAFE, reason="r"
+    )
     report = AuditReport(
         audit_id="ad1",
         started_at=datetime.now(UTC),
@@ -41,7 +43,9 @@ def test_format_human_audit_report():
 
 
 def test_format_human_plan():
-    c = Candidate(id="a", category="docker.image", size_bytes=1500, path_or_handle="x", confidence=Confidence.SAFE, reason="r")
+    c = Candidate(
+        id="a", category="docker.image", size_bytes=1500, path_or_handle="x", confidence=Confidence.SAFE, reason="r"
+    )
     plan = Plan(audit_id="ad1", candidates=[c])
     text = format_human(plan)
     assert "Plan preview" in text
@@ -50,15 +54,24 @@ def test_format_human_plan():
 
 
 def test_format_human_run_result():
-    c = Candidate(id="a", category="docker.image", size_bytes=1500, path_or_handle="x", confidence=Confidence.SAFE, reason="r")
-    result = RunResult(run_id="run_01", audit_id="ad1", per_candidate=[(c, {"success": True, "bytes_freed": 1500, "log": "ok"})], total_bytes_freed=1500)  # type: ignore[arg-type]
+    c = Candidate(
+        id="a", category="docker.image", size_bytes=1500, path_or_handle="x", confidence=Confidence.SAFE, reason="r"
+    )
+    result = RunResult(
+        run_id="run_01",
+        audit_id="ad1",
+        per_candidate=[(c, {"success": True, "bytes_freed": 1500, "log": "ok"})],
+        total_bytes_freed=1500,
+    )  # type: ignore[arg-type]
     text = format_human(result)
     assert "run_01" in text
     assert "1.5 KB" in text
 
 
 def test_format_candidates():
-    c = Candidate(id="a", category="docker.image", size_bytes=1500, path_or_handle="x", confidence=Confidence.SAFE, reason="r")
+    c = Candidate(
+        id="a", category="docker.image", size_bytes=1500, path_or_handle="x", confidence=Confidence.SAFE, reason="r"
+    )
     text = format_candidates([c])
     assert "a" in text
     assert "safe" in text
@@ -67,7 +80,9 @@ def test_format_candidates():
 
 
 def test_format_json():
-    c = Candidate(id="a", category="docker.image", size_bytes=1000, path_or_handle="x", confidence=Confidence.SAFE, reason="r")
+    c = Candidate(
+        id="a", category="docker.image", size_bytes=1000, path_or_handle="x", confidence=Confidence.SAFE, reason="r"
+    )
     plan = Plan(audit_id="ad1", candidates=[c])
     js = format_json(plan)
     data = json.loads(js)
@@ -77,7 +92,9 @@ def test_format_json():
 def test_format_md():
     from datetime import datetime
 
-    c = Candidate(id="a", category="docker.image", size_bytes=1000, path_or_handle="x", confidence=Confidence.SAFE, reason="r")
+    c = Candidate(
+        id="a", category="docker.image", size_bytes=1000, path_or_handle="x", confidence=Confidence.SAFE, reason="r"
+    )
     report = AuditReport(
         audit_id="ad1",
         started_at=datetime.now(UTC),
