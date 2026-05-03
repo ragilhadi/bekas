@@ -59,13 +59,13 @@ class RustTargetPlugin(Plugin):
     def supports_quarantine(self) -> bool:
         return True
 
-    def quarantine(self, candidate: Candidate, ctx: Context, quarantine_dir: str) -> RemovalResult:
+    def quarantine(self, candidate: Candidate, ctx: Context, quarantine_dir: str, run_id: str | None = None) -> RemovalResult:
         from bekas.quarantine import move_to_quarantine
 
         path = Path(candidate.path_or_handle)
         size = _du(path)
         try:
-            dest = move_to_quarantine("quarantine", path, candidate.category, size, candidate.metadata)
+            dest = move_to_quarantine(run_id or "quarantine", path, candidate.category, size, candidate.metadata)
             return RemovalResult(success=True, bytes_freed=size, undo_token=str(dest), log="quarantined")
         except Exception as exc:
             return RemovalResult(success=False, bytes_freed=0, log=str(exc))

@@ -73,7 +73,7 @@ class TuiApp(App):  # type: ignore[type-arg]
             return
         for pr in report.plugins:
             for c in pr.candidates:
-                if c.id in label:
+                if label.startswith(c.id + " —"):
                     table.add_row(c.id, _human_size(c.size_bytes), c.confidence.value, c.reason)
                     self.query_one("#detail-label", Label).update(f"Selected: {c.id}")
                     return

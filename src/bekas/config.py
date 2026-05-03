@@ -29,6 +29,7 @@ profiles:
       - "downloads"
       - "screenshots"
       - "dotfiles.backups"
+    git_repos: []
     plugin_settings:
       python.venvs:
         min_idle_days: 90

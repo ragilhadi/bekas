@@ -24,7 +24,9 @@ class SystemTmpPlugin(Plugin):
         tmp_dirs = [Path(tempfile.gettempdir())]
         # Also scan /tmp on Unix
         if os.name != "nt":
-            tmp_dirs.append(Path("/tmp"))
+            tmp = Path("/tmp")
+            if tmp not in tmp_dirs:
+                tmp_dirs.append(tmp)
         min_age_days = ctx.config.get("plugin_settings", {}).get("system.tmp", {}).get("min_age_days", 30)
         cutoff = datetime.now() - timedelta(days=min_age_days)
         current_user = getpass.getuser()

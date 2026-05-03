@@ -63,7 +63,7 @@ def run_audit(
         r.candidates = filter_candidates(r.candidates, user_exclusions)
 
     duration_ms = int((time.time() - started_ts) * 1000)
-    total_candidates = sum(pr.candidates_found for pr in reports)
+    total_candidates = sum(len(pr.candidates) for pr in reports)
     total_bytes = sum(c.size_bytes for pr in reports for c in pr.candidates)
     by_confidence: dict[str, dict[str, int]] = {}
     for conf in Confidence:
@@ -73,7 +73,7 @@ def run_audit(
     system = SystemInfo(
         os=platform.system().lower(),
         arch=platform.machine().lower(),
-        free_disk_bytes=shutil.disk_usage("/").free,
+        free_disk_bytes=shutil.disk_usage(".").free,
     )
 
     return AuditReport(

@@ -29,7 +29,7 @@ class FakePlugin(Plugin):
     def supports_quarantine(self):
         return True
 
-    def quarantine(self, candidate, ctx, quarantine_dir):
+    def quarantine(self, candidate, ctx, quarantine_dir, run_id=None):
         return RemovalResult(
             success=True, bytes_freed=candidate.size_bytes, undo_token="/quarantine/x", log="quarantined"
         )

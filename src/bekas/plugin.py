@@ -42,7 +42,7 @@ class Plugin(ABC):
     def supports_undo(self) -> bool:
         return False
 
-    def quarantine(self, candidate: Candidate, ctx: Context, quarantine_dir: str) -> RemovalResult:
+    def quarantine(self, candidate: Candidate, ctx: Context, quarantine_dir: str, run_id: str | None = None) -> RemovalResult:
         """Quarantine a candidate instead of deleting."""
         return RemovalResult(success=False, bytes_freed=0, log="Plugin does not support quarantine.")
 

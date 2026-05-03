@@ -67,12 +67,14 @@ def apply_plan(
             if plugin is None:
                 # Fall back to generic deletion if no plugin matched category exactly
                 removal_result = _generic_remove(c, ctx, quarantine_enabled, run_id)
+                if removal_result.success:
+                    total_freed += removal_result.bytes_freed
             else:
                 if ctx.dry_run:
                     removal_result = RemovalResult(success=True, bytes_freed=0, log="dry-run")
                 else:
                     if quarantine_enabled and plugin.supports_quarantine():
-                        removal_result = plugin.quarantine(c, ctx, str(quarantine_dir()))
+                        removal_result = plugin.quarantine(c, ctx, str(quarantine_dir()), run_id=run_id)
                         # Quarantine counts as reclamation regardless of undo_token presence
                         if removal_result.success:
                             total_freed += removal_result.bytes_freed

@@ -52,7 +52,7 @@ _SENSITIVE_NAMES: set[str] = {
 }
 
 # Path traversal pattern: matches .. followed by / or \ anywhere in the raw path string
-_TRAVERSAL_RE = re.compile(r"\.\.[/\\]|/\.\./|\\\.\\")
+_TRAVERSAL_RE = re.compile(r"(?:^|/|\\)\.\.(?:/|\\|$)")
 
 
 def _expand_exclusions() -> list[Path]:
@@ -141,7 +141,7 @@ def is_excluded(path: Path | str, user_exclusions: list[str] | None = None) -> b
                 if resolved == rp or _is_ancestor(rp, resolved):
                     return True
             except (OSError, ValueError):
-                return True
+                continue
 
     return False
 
