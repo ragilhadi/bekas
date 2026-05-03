@@ -12,7 +12,17 @@ from bekas.plugin import Plugin
 
 
 class PythonCachePlugin(Plugin):
-    """Finds __pycache__ and tool caches in old/abandoned projects."""
+    """Finds __pycache__ and tool caches in old/abandoned projects.
+
+    Scans common project roots for cache directories such as
+    ``__pycache__``, ``.pytest_cache``, ``.mypy_cache``, and ``.ruff_cache``.
+
+    Attributes:
+        name: Plugin identifier.
+        description: Human-readable description.
+        requires_commands: No external commands required.
+        CACHE_NAMES: Set of cache directory names to search for.
+    """
 
     name = "python.cache"
     description = "Finds __pycache__, .pytest_cache, .mypy_cache, .ruff_cache in old projects."
@@ -21,6 +31,14 @@ class PythonCachePlugin(Plugin):
     CACHE_NAMES = {"__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache"}
 
     def discover(self, ctx: Context) -> Iterator[Candidate]:
+        """Yield Python cache directory candidates.
+
+        Args:
+            ctx: Execution context with plugin_settings.
+
+        Yields:
+            Candidate objects representing cache directories.
+        """
         roots = [Path.home() / "code", Path.home() / "projects", Path.home() / "dev", Path.home()]
         roots = [r for r in roots if r.exists()]
         min_idle_days = ctx.config.get("plugin_settings", {}).get("python.cache", {}).get("min_idle_days", 90)
@@ -58,6 +76,15 @@ class PythonCachePlugin(Plugin):
                         )
 
     def remove(self, candidate: Candidate, ctx: Context) -> RemovalResult:
+        """Delete a cache directory.
+
+        Args:
+            candidate: Cache directory candidate to remove.
+            ctx: Execution context.
+
+        Returns:
+            Result of the deletion attempt.
+        """
         path = Path(candidate.path_or_handle)
         if not path.exists():
             return RemovalResult(success=False, bytes_freed=0, log="Path does not exist")
@@ -72,6 +99,15 @@ class PythonCachePlugin(Plugin):
 
 
 def _find_caches(root: Path, seen: set[Path]) -> Iterator[Path]:
+    """Walk a directory tree and yield cache directory paths.
+
+    Args:
+        root: Directory to walk.
+        seen: Set of already-yielded paths to avoid duplicates.
+
+    Yields:
+        Resolved paths to cache directories.
+    """
     for dirpath, dirnames, _ in os.walk(root):
         dp = Path(dirpath)
         for d in list(dirnames):
@@ -88,6 +124,14 @@ def _find_caches(root: Path, seen: set[Path]) -> Iterator[Path]:
 
 
 def _du(path: Path) -> int:
+    """Compute the total byte size of a path recursively.
+
+    Args:
+        path: File or directory to measure.
+
+    Returns:
+        Total size in bytes.
+    """
     total = 0
     try:
         if path.is_file():

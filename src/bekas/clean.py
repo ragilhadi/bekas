@@ -15,6 +15,15 @@ from bekas.safety import is_excluded
 
 
 def _find_plugin(plugins: list[Plugin], name: str) -> Plugin | None:
+    """Find a plugin by its exact name.
+
+    Args:
+        plugins: List of loaded plugins.
+        name: Plugin name to match against ``Plugin.name``.
+
+    Returns:
+        The matching plugin, or None if not found.
+    """
     for p in plugins:
         if p.name == name:
             return p
@@ -22,6 +31,14 @@ def _find_plugin(plugins: list[Plugin], name: str) -> Plugin | None:
 
 
 def _group_by_category(candidates: list[Candidate]) -> dict[str, list[Candidate]]:
+    """Group candidates by their top-level category prefix.
+
+    Args:
+        candidates: Candidates to group.
+
+    Returns:
+        Mapping from category prefix (before the first '.') to candidates.
+    """
     groups: dict[str, list[Candidate]] = {}
     for c in candidates:
         cat = c.category.split(".")[0]
@@ -38,6 +55,24 @@ def apply_plan(
     quarantine_enabled: bool = False,
     profile_name: str | None = None,
 ) -> RunResult:
+    """Apply a cleanup plan and return the run result.
+
+    Iterates over plan candidates grouped by category, optionally
+    prompting for confirmation, then delegates removal to the
+    matching plugin or falls back to generic deletion.
+
+    Args:
+        plan: The plan to apply.
+        plugins: Available plugins for category-specific removal.
+        ctx: Execution context (controls dry-run and verbosity).
+        audit: Optional originating audit report (reserved for future use).
+        yes_all: If True, skip interactive per-category confirmation.
+        quarantine_enabled: If True, quarantine instead of deleting when supported.
+        profile_name: Optional profile name to load settings from.
+
+    Returns:
+        RunResult summarizing the operation.
+    """
     _ = audit  # reserved for future use
     profile = profile_for(profile_name)
     quarantine_enabled = quarantine_enabled or profile.get("quarantine_enabled", False)
@@ -97,6 +132,17 @@ def apply_plan(
 
 
 def _generic_remove(candidate: Candidate, ctx: Context, quarantine_enabled: bool, run_id: str) -> RemovalResult:
+    """Perform generic removal for a candidate without a matching plugin.
+
+    Args:
+        candidate: Candidate to remove.
+        ctx: Execution context (dry_run is respected).
+        quarantine_enabled: If True, move to quarantine instead of deleting.
+        run_id: Run identifier for quarantine tracking.
+
+    Returns:
+        Result of the removal or quarantine operation.
+    """
     p = Path(candidate.path_or_handle)
     if not p.exists():
         return RemovalResult(success=False, bytes_freed=0, log="Path does not exist")
@@ -129,6 +175,14 @@ def _generic_remove(candidate: Candidate, ctx: Context, quarantine_enabled: bool
 
 
 def _human_size(size_bytes: int) -> str:
+    """Convert a byte size into a human-readable string.
+
+    Args:
+        size_bytes: Size in bytes.
+
+    Returns:
+        Human-readable size (e.g., "1.5 MB").
+    """
     size = float(size_bytes)
     for unit in ["B", "KB", "MB", "GB", "TB"]:
         if abs(size) < 1024.0:

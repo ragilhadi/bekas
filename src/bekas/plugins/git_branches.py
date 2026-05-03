@@ -12,13 +12,30 @@ from bekas.plugin import Plugin
 
 
 class GitBranchesPlugin(Plugin):
-    """Finds stale local git branches fully merged into the default branch."""
+    """Finds stale local git branches fully merged into the default branch.
+
+    Scans configured git repositories for branches that are fully merged
+    and have not received commits in a configurable number of days.
+
+    Attributes:
+        name: Plugin identifier.
+        description: Human-readable description.
+        requires_commands: List of required external commands.
+    """
 
     name = "git.branches"
     description = "Finds fully merged local git branches older than a threshold."
     requires_commands = ["git"]
 
     def discover(self, ctx: Context) -> Iterator[Candidate]:
+        """Yield stale git branch candidates.
+
+        Args:
+            ctx: Execution context with git_repos configuration.
+
+        Yields:
+            Candidate objects representing stale merged branches.
+        """
         repos = ctx.config.get("git_repos", [])
         if not repos:
             return
@@ -53,6 +70,15 @@ class GitBranchesPlugin(Plugin):
                     )
 
     def remove(self, candidate: Candidate, ctx: Context) -> RemovalResult:
+        """Delete a local git branch.
+
+        Args:
+            candidate: Branch candidate to remove.
+            ctx: Execution context.
+
+        Returns:
+            Result of the branch deletion attempt.
+        """
         repo = Path(candidate.path_or_handle)
         branch = candidate.metadata.get("branch", "")
         try:
@@ -68,14 +94,31 @@ class GitBranchesPlugin(Plugin):
             return RemovalResult(success=False, bytes_freed=0, log=str(exc))
 
     def supports_undo(self) -> bool:
+        """Return False because branch deletion cannot be undone by this plugin.
+
+        Returns:
+            Whether undo is supported.
+        """
         return False
 
     def supports_quarantine(self) -> bool:
+        """Return False because branches cannot be quarantined.
+
+        Returns:
+            Whether quarantine is supported.
+        """
         return False
 
 
 def _default_branch(repo: Path) -> str | None:
-    """Detect the default branch (main or master)."""
+    """Detect the default branch (main or master) of a repository.
+
+    Args:
+        repo: Path to the git repository.
+
+    Returns:
+        Name of the default branch, or None if neither exists.
+    """
     for name in ("main", "master"):
         result = shutil.which("git")
         if result:
@@ -92,6 +135,15 @@ def _default_branch(repo: Path) -> str | None:
 
 
 def _merged_branches(repo: Path, default: str) -> list[str]:
+    """List local branches that are fully merged into the default branch.
+
+    Args:
+        repo: Path to the git repository.
+        default: Name of the default branch.
+
+    Returns:
+        List of merged branch names.
+    """
     proc = subprocess.run(
         ["git", "branch", "--merged", default],
         cwd=repo,
@@ -112,6 +164,15 @@ def _merged_branches(repo: Path, default: str) -> list[str]:
 
 
 def _last_commit_date(repo: Path, branch: str) -> datetime | None:
+    """Get the timestamp of the last commit on a branch.
+
+    Args:
+        repo: Path to the git repository.
+        branch: Branch name.
+
+    Returns:
+        Datetime of the last commit, or None if unavailable.
+    """
     proc = subprocess.run(
         ["git", "log", "-1", "--format=%ct", branch],
         cwd=repo,

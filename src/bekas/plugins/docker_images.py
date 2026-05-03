@@ -13,16 +13,41 @@ from bekas.plugin import Plugin
 
 
 class DockerImagesPlugin(Plugin):
-    """Finds dangling and unused Docker images."""
+    """Finds dangling and unused Docker images.
+
+    Discovers Docker images that are dangling (no tags, no children) or
+    unused by any container, and classifies them by safety tier.
+
+    Attributes:
+        name: Plugin identifier.
+        description: Human-readable description.
+        requires_commands: List of required external commands.
+    """
 
     name = "docker.images"
     description = "Finds dangling and unused Docker images."
     requires_commands = ["docker"]
 
     def is_available(self, ctx: Context) -> bool:
+        """Check if the ``docker`` command is present on PATH.
+
+        Args:
+            ctx: Execution context.
+
+        Returns:
+            True if Docker is available.
+        """
         return shutil.which("docker") is not None
 
     def discover(self, ctx: Context) -> Iterator[Candidate]:
+        """Yield Docker image candidates.
+
+        Args:
+            ctx: Execution context.
+
+        Yields:
+            Candidate objects representing Docker images.
+        """
         try:
             in_use_ids = _images_in_use_by_containers(ctx)
             dangling_ids = _dangling_images(ctx)
@@ -70,6 +95,15 @@ class DockerImagesPlugin(Plugin):
             pass
 
     def remove(self, candidate: Candidate, ctx: Context) -> RemovalResult:
+        """Remove a Docker image.
+
+        Args:
+            candidate: Docker image candidate to remove.
+            ctx: Execution context.
+
+        Returns:
+            Result of the removal attempt.
+        """
         img_id = candidate.metadata.get("image_id", candidate.id.replace("docker:", ""))
         # Validate image ID: must be alphanumeric with colon/hyphen/underscore, no spaces or shell metacharacters
         if not img_id or not re.fullmatch(r"[A-Za-z0-9._:\-]+", img_id):
@@ -84,13 +118,31 @@ class DockerImagesPlugin(Plugin):
         )
 
     def supports_undo(self) -> bool:
+        """Return False because Docker image removal cannot be undone.
+
+        Returns:
+            Whether undo is supported.
+        """
         return False
 
     def supports_quarantine(self) -> bool:
+        """Return False because Docker images cannot be quarantined.
+
+        Returns:
+            Whether quarantine is supported.
+        """
         return False
 
 
 def _list_images(ctx: Context) -> list[dict[str, Any]]:
+    """List all Docker images as dictionaries.
+
+    Args:
+        ctx: Execution context.
+
+    Returns:
+        List of image metadata dictionaries.
+    """
     proc = ctx.run_command(["docker", "images", "--format", "json"])
     if proc.returncode != 0:
         return []
@@ -106,7 +158,14 @@ def _list_images(ctx: Context) -> list[dict[str, Any]]:
 
 
 def _dangling_images(ctx: Context) -> set[str]:
-    """Return IDs of images that are dangling (no tags, no children)."""
+    """Return IDs of images that are dangling (no tags, no children).
+
+    Args:
+        ctx: Execution context.
+
+    Returns:
+        Set of dangling image IDs.
+    """
     proc = ctx.run_command(["docker", "images", "--filter", "dangling=true", "--format", "json"])
     ids: set[str] = set()
     if proc.returncode != 0:
@@ -123,7 +182,14 @@ def _dangling_images(ctx: Context) -> set[str]:
 
 
 def _images_in_use_by_containers(ctx: Context) -> set[str]:
-    """Return image IDs that are referenced by existing containers (running or stopped)."""
+    """Return image IDs referenced by existing containers.
+
+    Args:
+        ctx: Execution context.
+
+    Returns:
+        Set of image IDs in use.
+    """
     proc = ctx.run_command(["docker", "ps", "--all", "--format", "json"])
     ids: set[str] = set()
     if proc.returncode != 0:
@@ -144,7 +210,15 @@ def _images_in_use_by_containers(ctx: Context) -> set[str]:
 
 
 def _resolve_image_id(ctx: Context, image: str) -> str:
-    """Get the canonical image ID for a repo:tag or short ID."""
+    """Resolve a repo:tag or short ID to a canonical image ID.
+
+    Args:
+        ctx: Execution context.
+        image: Image reference string.
+
+    Returns:
+        Canonical image ID, or empty string if resolution fails.
+    """
     proc = ctx.run_command(["docker", "inspect", "--format", "{{.Id}}", image])
     if proc.returncode == 0:
         return proc.stdout.strip()
@@ -152,7 +226,15 @@ def _resolve_image_id(ctx: Context, image: str) -> str:
 
 
 def _container_names_for_image(ctx: Context, img_id: str) -> list[str]:
-    """Return container names that use a given image ID."""
+    """Return container names that use a given image ID.
+
+    Args:
+        ctx: Execution context.
+        img_id: Canonical image ID.
+
+    Returns:
+        List of container names.
+    """
     proc = ctx.run_command(["docker", "ps", "--all", "--format", "json"])
     names: list[str] = []
     if proc.returncode != 0:
@@ -172,7 +254,14 @@ def _container_names_for_image(ctx: Context, img_id: str) -> list[str]:
 
 
 def _parse_docker_size(size_str: str) -> int:
-    """Parse Docker size strings like '1.23GB' or '456MB'."""
+    """Parse Docker size strings like '1.23GB' or '456MB'.
+
+    Args:
+        size_str: Docker-formatted size string.
+
+    Returns:
+        Size in bytes.
+    """
     size_str = size_str.strip().replace(" ", "").upper()
     multipliers = {"B": 1, "KB": 1024, "MB": 1024**2, "GB": 1024**3, "TB": 1024**4}
     for suffix, mult in multipliers.items():

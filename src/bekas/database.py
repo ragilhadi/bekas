@@ -14,6 +14,16 @@ from bekas.models import Plan, RunResult
 
 
 def _init_db(db_path: Path | None = None) -> sqlite3.Connection:
+    """Initialize the SQLite database with required tables.
+
+    Creates the ``runs`` and ``quarantine`` tables if they do not exist.
+
+    Args:
+        db_path: Optional custom database path. Defaults to ``runs_db_path()``.
+
+    Returns:
+        Open SQLite connection with ``row_factory`` set to ``sqlite3.Row``.
+    """
     path = db_path or runs_db_path()
     conn = sqlite3.connect(str(path))
     conn.row_factory = sqlite3.Row
@@ -48,6 +58,12 @@ def _init_db(db_path: Path | None = None) -> sqlite3.Connection:
 
 
 def log_run(result: RunResult, db_path: Path | None = None) -> None:
+    """Persist a RunResult into the database.
+
+    Args:
+        result: The run result to log.
+        db_path: Optional custom database path.
+    """
     conn = _init_db(db_path)
     plan = Plan(audit_id=result.audit_id, candidates=[c for c, _ in result.per_candidate])
     results = [
@@ -77,6 +93,14 @@ def log_run(result: RunResult, db_path: Path | None = None) -> None:
 
 
 def list_runs(db_path: Path | None = None) -> list[dict[str, Any]]:
+    """List all recorded runs ordered by timestamp descending.
+
+    Args:
+        db_path: Optional custom database path.
+
+    Returns:
+        List of run dictionaries.
+    """
     conn = _init_db(db_path)
     rows = conn.execute(
         "SELECT run_id, timestamp, audit_id, total_bytes_freed FROM runs ORDER BY timestamp DESC"
@@ -86,6 +110,15 @@ def list_runs(db_path: Path | None = None) -> list[dict[str, Any]]:
 
 
 def get_run(run_id: str, db_path: Path | None = None) -> dict[str, Any] | None:
+    """Retrieve a single run by its identifier.
+
+    Args:
+        run_id: Run identifier to look up.
+        db_path: Optional custom database path.
+
+    Returns:
+        Run dictionary, or None if not found.
+    """
     conn = _init_db(db_path)
     row = conn.execute("SELECT * FROM runs WHERE run_id = ?", (run_id,)).fetchone()
     conn.close()
@@ -95,6 +128,12 @@ def get_run(run_id: str, db_path: Path | None = None) -> dict[str, Any] | None:
 
 
 def delete_run(run_id: str, db_path: Path | None = None) -> None:
+    """Delete a run record from the database.
+
+    Args:
+        run_id: Run identifier to delete.
+        db_path: Optional custom database path.
+    """
     conn = _init_db(db_path)
     conn.execute("DELETE FROM runs WHERE run_id = ?", (run_id,))
     conn.commit()
@@ -110,6 +149,20 @@ def add_quarantine(
     metadata: dict[str, Any] | None = None,
     db_path: Path | None = None,
 ) -> str:
+    """Add a quarantine entry to the database.
+
+    Args:
+        run_id: Identifier of the run that triggered quarantine.
+        category: Candidate category.
+        original_path: Original filesystem path.
+        quarantine_path: Path where the item was quarantined.
+        size_bytes: Size of the quarantined item in bytes.
+        metadata: Optional metadata dictionary.
+        db_path: Optional custom database path.
+
+    Returns:
+        The generated quarantine identifier.
+    """
     conn = _init_db(db_path)
     qid = f"q_{uuid.uuid4().hex[:12]}"
     conn.execute(
@@ -133,6 +186,14 @@ def add_quarantine(
 
 
 def list_quarantine(db_path: Path | None = None) -> list[dict[str, Any]]:
+    """List all quarantine entries ordered by timestamp descending.
+
+    Args:
+        db_path: Optional custom database path.
+
+    Returns:
+        List of quarantine dictionaries.
+    """
     conn = _init_db(db_path)
     rows = conn.execute("SELECT * FROM quarantine ORDER BY timestamp DESC").fetchall()
     conn.close()
@@ -140,6 +201,15 @@ def list_quarantine(db_path: Path | None = None) -> list[dict[str, Any]]:
 
 
 def get_quarantine_item(qid: str, db_path: Path | None = None) -> dict[str, Any] | None:
+    """Retrieve a single quarantine entry by its identifier.
+
+    Args:
+        qid: Quarantine identifier.
+        db_path: Optional custom database path.
+
+    Returns:
+        Quarantine dictionary, or None if not found.
+    """
     conn = _init_db(db_path)
     row = conn.execute("SELECT * FROM quarantine WHERE quarantine_id = ?", (qid,)).fetchone()
     conn.close()
@@ -149,6 +219,12 @@ def get_quarantine_item(qid: str, db_path: Path | None = None) -> dict[str, Any]
 
 
 def remove_quarantine_entry(qid: str, db_path: Path | None = None) -> None:
+    """Remove a quarantine record from the database.
+
+    Args:
+        qid: Quarantine identifier to delete.
+        db_path: Optional custom database path.
+    """
     conn = _init_db(db_path)
     conn.execute("DELETE FROM quarantine WHERE quarantine_id = ?", (qid,))
     conn.commit()

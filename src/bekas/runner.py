@@ -17,6 +17,18 @@ from bekas.safety import filter_candidates
 
 
 def _run_plugin(plugin: Plugin, ctx: Context) -> PluginReport:
+    """Run a single plugin and collect discovered candidates.
+
+    Exceptions raised during discovery are swallowed so that a crashing
+    plugin does not abort the entire audit.
+
+    Args:
+        plugin: Plugin instance to run.
+        ctx: Execution context passed to the plugin.
+
+    Returns:
+        PluginReport containing discovered candidates and the raw count.
+    """
     candidates: list[Candidate] = []
     try:
         for c in plugin.discover(ctx):
@@ -33,6 +45,21 @@ def run_audit(
     profile_name: str | None = None,
     serial: bool = False,
 ) -> AuditReport:
+    """Run an audit across all enabled and available plugins.
+
+    Discovers candidates, filters them through safety exclusions, and
+    produces a summary with system information.
+
+    Args:
+        plugins: List of plugin instances to consider.
+        ctx: Optional execution context; a default dry-run context is
+            created if not provided.
+        profile_name: Optional configuration profile name.
+        serial: If True, run plugins sequentially instead of in a thread pool.
+
+    Returns:
+        Complete AuditReport with per-plugin results and aggregated summary.
+    """
     cfg = load_config()
     profile = profile_for(profile_name)
     patterns = profile.get("enabled_plugins", ["*"])

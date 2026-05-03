@@ -60,39 +60,78 @@ git_repos: []
 
 
 def _config_dir() -> Path:
+    """Return the directory where bekas stores its configuration.
+
+    Returns:
+        Path to the configuration directory.
+    """
     return Path(user_config_dir("bekas", appauthor=False))
 
 
 def _data_dir() -> Path:
+    """Return the directory where bekas stores its runtime data.
+
+    Returns:
+        Path to the data directory.
+    """
     return Path(user_data_dir("bekas", appauthor=False))
 
 
 def config_path() -> Path:
+    """Return the path to the bekas configuration file.
+
+    Returns:
+        Path to ``config.yaml``.
+    """
     return _config_dir() / "config.yaml"
 
 
 def data_dir() -> Path:
+    """Ensure and return the bekas data directory.
+
+    Returns:
+        Path to the data directory (created if missing).
+    """
     d = _data_dir()
     d.mkdir(parents=True, exist_ok=True)
     return d
 
 
 def quarantine_dir() -> Path:
+    """Ensure and return the quarantine directory.
+
+    Returns:
+        Path to the quarantine subdirectory inside the data directory.
+    """
     d = data_dir() / "quarantine"
     d.mkdir(parents=True, exist_ok=True)
     return d
 
 
 def runs_db_path() -> Path:
+    """Return the path to the SQLite runs database.
+
+    Returns:
+        Path to ``runs.db`` inside the data directory.
+    """
     return data_dir() / "runs.db"
 
 
 def audit_log_path() -> Path:
+    """Return the path to the audit log file.
+
+    Returns:
+        Path to ``audit.log`` inside the data directory.
+    """
     return data_dir() / "audit.log"
 
 
 def ensure_config() -> Path:
-    """Create default config if missing. Returns path to config."""
+    """Create the default configuration file if it does not exist.
+
+    Returns:
+        Path to the configuration file.
+    """
     cfg = config_path()
     if not cfg.exists():
         cfg.parent.mkdir(parents=True, exist_ok=True)
@@ -101,18 +140,40 @@ def ensure_config() -> Path:
 
 
 def load_config() -> dict[str, Any]:
+    """Load and parse the bekas configuration file.
+
+    Returns:
+        Parsed YAML content as a dictionary.
+    """
     cfg = ensure_config()
     with cfg.open() as f:
         return yaml.safe_load(f) or {}
 
 
 def active_profile(cfg: dict[str, Any]) -> dict[str, Any]:
+    """Extract the active profile dictionary from a loaded config.
+
+    Args:
+        cfg: Parsed configuration dictionary.
+
+    Returns:
+        Dictionary representing the active profile.
+    """
     name = cfg.get("active_profile", "default")
     profiles = cfg.get("profiles", {})
     return profiles.get(name, {}) or {}
 
 
 def is_plugin_enabled(patterns: list[str], plugin_name: str) -> bool:
+    """Check whether a plugin name matches any of the given wildcard patterns.
+
+    Args:
+        patterns: List of glob-style patterns (e.g., ``["docker.*", "python.*"]``).
+        plugin_name: Name of the plugin to test.
+
+    Returns:
+        True if the plugin name matches at least one pattern.
+    """
     for pat in patterns:
         if pat == "*":
             return True
@@ -122,6 +183,14 @@ def is_plugin_enabled(patterns: list[str], plugin_name: str) -> bool:
 
 
 def profile_for(profile_name: str | None = None) -> dict[str, Any]:
+    """Retrieve the requested profile or the active profile from config.
+
+    Args:
+        profile_name: Optional explicit profile name.
+
+    Returns:
+        Dictionary representing the selected profile.
+    """
     cfg = load_config()
     if profile_name:
         profiles = cfg.get("profiles", {})

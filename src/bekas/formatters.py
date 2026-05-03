@@ -8,6 +8,14 @@ from bekas.models import AuditReport, Candidate, Plan, RunResult
 
 
 def format_human(report: AuditReport | Plan | RunResult) -> str:
+    """Format a report, plan, or run result as human-readable text.
+
+    Args:
+        report: Object to format.
+
+    Returns:
+        Multi-line human-readable string.
+    """
     lines: list[str] = []
     if isinstance(report, AuditReport):
         lines.append(f"Audit complete in {report.duration_ms // 1000}s.")
@@ -48,6 +56,14 @@ def format_human(report: AuditReport | Plan | RunResult) -> str:
 
 
 def format_json(report: AuditReport | Plan | RunResult) -> str:
+    """Format a report, plan, or run result as indented JSON.
+
+    Args:
+        report: Object to serialize.
+
+    Returns:
+        Indented JSON string.
+    """
     if isinstance(report, AuditReport):
         return json.dumps(report.model_dump(mode="json"), indent=2)
     if isinstance(report, Plan):
@@ -58,6 +74,14 @@ def format_json(report: AuditReport | Plan | RunResult) -> str:
 
 
 def format_md(report: AuditReport) -> str:
+    """Format an AuditReport as Markdown.
+
+    Args:
+        report: Audit report to format.
+
+    Returns:
+        Markdown string.
+    """
     lines: list[str] = []
     lines.append("# Bekas Audit Report")
     lines.append(f"\n- **Audit ID**: {report.audit_id}")
@@ -80,6 +104,14 @@ def format_md(report: AuditReport) -> str:
 
 
 def _human_size(size_bytes: int) -> str:
+    """Convert a byte size into a human-readable string.
+
+    Args:
+        size_bytes: Size in bytes.
+
+    Returns:
+        Human-readable size (e.g., "1.5 MB").
+    """
     size = float(size_bytes)
     for unit in ["B", "KB", "MB", "GB", "TB"]:
         if abs(size) < 1024.0:
@@ -89,6 +121,14 @@ def _human_size(size_bytes: int) -> str:
 
 
 def format_candidates(candidates: list[Candidate]) -> str:
+    """Format a list of candidates as human-readable text.
+
+    Args:
+        candidates: Candidates to format.
+
+    Returns:
+        Multi-line string with IDs, confidence tiers, sizes, reasons, and paths.
+    """
     lines: list[str] = []
     for c in candidates:
         lines.append(f"{c.id} [{c.confidence.value}] {_human_size(c.size_bytes)}")

@@ -14,15 +14,32 @@ from bekas.plugin import Plugin
 
 
 class SystemTmpPlugin(Plugin):
-    """Finds old temporary files the user owns."""
+    """Finds old temporary files the user owns.
+
+    Scans system temporary directories for files older than a threshold
+    and owned by the current user.
+
+    Attributes:
+        name: Plugin identifier.
+        description: Human-readable description.
+        requires_commands: No external commands required.
+    """
 
     name = "system.tmp"
     description = "Finds old temporary files owned by the current user."
     requires_commands = []
 
     def discover(self, ctx: Context) -> Iterator[Candidate]:
+        """Yield old temporary file candidates.
+
+        Args:
+            ctx: Execution context with plugin_settings.
+
+        Yields:
+            Candidate objects representing old temporary files.
+        """
         tmp_dirs = [Path(tempfile.gettempdir())]
-        # Also scan /tmp on Unix
+        # Also scan /tmp on Unix, avoiding duplicates
         if os.name != "nt":
             tmp = Path("/tmp")
             if tmp not in tmp_dirs:
@@ -62,6 +79,15 @@ class SystemTmpPlugin(Plugin):
                     )
 
     def remove(self, candidate: Candidate, ctx: Context) -> RemovalResult:
+        """Delete a temporary file.
+
+        Args:
+            candidate: Temporary file candidate to remove.
+            ctx: Execution context.
+
+        Returns:
+            Result of the deletion attempt.
+        """
         path = Path(candidate.path_or_handle)
         if not path.exists():
             return RemovalResult(success=False, bytes_freed=0, log="Path does not exist")

@@ -12,6 +12,15 @@ from bekas.database import add_quarantine, list_quarantine, remove_quarantine_en
 
 
 def quarantine_path(timestamp: datetime | None = None) -> Path:
+    """Generate and ensure a timestamped quarantine subdirectory.
+
+    Args:
+        timestamp: Optional timestamp to base the directory name on.
+            Defaults to the current UTC time.
+
+    Returns:
+        Path to the created quarantine subdirectory.
+    """
     ts = timestamp or datetime.now(UTC)
     d = quarantine_dir() / ts.strftime("%Y%m%d_%H%M%S")
     d.mkdir(parents=True, exist_ok=True)
@@ -25,6 +34,21 @@ def move_to_quarantine(
     size_bytes: int,
     metadata: dict[str, Any] | None = None,
 ) -> Path:
+    """Move a file or directory into quarantine and log the operation.
+
+    Args:
+        run_id: Run identifier for audit tracking.
+        original: Path to the item being quarantined.
+        category: Candidate category.
+        size_bytes: Size of the item in bytes.
+        metadata: Optional metadata dictionary.
+
+    Returns:
+        Path to the quarantined item.
+
+    Raises:
+        OSError: If the move operation fails.
+    """
     qdir = quarantine_path()
     dest = qdir / original.name
     # Avoid collision
@@ -43,6 +67,19 @@ def move_to_quarantine(
 
 
 def restore_from_quarantine(qid: str) -> Path:
+    """Restore a quarantined item to its original location.
+
+    Args:
+        qid: Quarantine identifier or quarantine path (undo_token).
+
+    Returns:
+        Path to the restored item.
+
+    Raises:
+        FileNotFoundError: If the quarantine item is not found.
+        FileExistsError: If the restore destination already exists.
+        OSError: If the move operation fails.
+    """
     rows = list_quarantine()
     # Try lookup by quarantine_id first, then by quarantine_path (undo_token may be a path)
     row = next((r for r in rows if r["quarantine_id"] == qid), None)
@@ -61,7 +98,15 @@ def restore_from_quarantine(qid: str) -> Path:
 
 
 def purge_old_quarantine(retention_days: int = 30) -> tuple[int, int]:
-    """Remove quarantined items older than retention_days. Returns (items_removed, bytes_freed)."""
+    """Remove quarantined items older than the retention threshold.
+
+    Args:
+        retention_days: Age threshold in days. Items older than this are removed.
+            Defaults to 30. Use 0 to purge everything.
+
+    Returns:
+        Tuple of (items_removed, bytes_freed).
+    """
     cutoff = datetime.now(UTC) - timedelta(days=retention_days)
     rows = list_quarantine()
     removed = 0

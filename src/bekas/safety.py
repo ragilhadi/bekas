@@ -51,11 +51,19 @@ _SENSITIVE_NAMES: set[str] = {
     ".netrc",
 }
 
-# Path traversal pattern: matches .. followed by / or \ anywhere in the raw path string
+# Path traversal pattern: matches .. as a standalone path component
 _TRAVERSAL_RE = re.compile(r"(?:^|/|\\)\.\.(?:/|\\|$)")
 
 
 def _expand_exclusions() -> list[Path]:
+    """Build a list of resolved paths that must never be touched.
+
+    Includes hard system paths, home-level sensitive directories,
+    and Windows environment paths when applicable.
+
+    Returns:
+        Resolved Path objects representing excluded locations.
+    """
     excl: list[Path] = []
     for p in _HARD_EXCLUSIONS:
         try:
@@ -81,7 +89,15 @@ def _expand_exclusions() -> list[Path]:
 
 
 def _is_ancestor(ancestor: Path, child: Path) -> bool:
-    """Return True if ancestor is a strict ancestor of child (and not root)."""
+    """Return True if ancestor is a strict ancestor of child (and not root).
+
+    Args:
+        ancestor: Potential ancestor path.
+        child: Path to test.
+
+    Returns:
+        True if child is inside ancestor but not equal to it.
+    """
     try:
         # Use relative_to for robust ancestor checking
         child.relative_to(ancestor)
@@ -91,7 +107,18 @@ def _is_ancestor(ancestor: Path, child: Path) -> bool:
 
 
 def is_excluded(path: Path | str, user_exclusions: list[str] | None = None) -> bool:
-    """Return True if the given path must never be touched."""
+    """Determine whether a path must never be touched.
+
+    Checks traversal patterns, hard system exclusions, sensitive globs,
+    and user-defined exclusion patterns.
+
+    Args:
+        path: Filesystem path or string to evaluate.
+        user_exclusions: Optional list of user-defined exclusion patterns.
+
+    Returns:
+        True if the path is excluded, False otherwise.
+    """
     raw_str = str(path)
 
     # Path traversal guard: check BEFORE resolving, on the raw path string.
@@ -147,7 +174,15 @@ def is_excluded(path: Path | str, user_exclusions: list[str] | None = None) -> b
 
 
 def filter_candidates(candidates: list[Candidate], user_exclusions: list[str] | None = None) -> list[Candidate]:
-    """Remove any candidates whose path_or_handle is excluded."""
+    """Remove any candidates whose path_or_handle is excluded.
+
+    Args:
+        candidates: List of candidates to filter.
+        user_exclusions: Optional user-defined exclusion patterns.
+
+    Returns:
+        Candidates whose paths are not excluded.
+    """
     safe: list[Candidate] = []
     for c in candidates:
         if is_excluded(c.path_or_handle, user_exclusions):

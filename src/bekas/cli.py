@@ -25,10 +25,26 @@ from bekas.signing import sign_plan, verify_plan
 
 
 def _get_plugins() -> list[Plugin]:
+    """Discover and return all installed plugins.
+
+    Returns:
+        List of plugin instances.
+    """
     return discover_plugins()
 
 
 def _audit_to_plan(report: AuditReport, safe_only: bool = False, include_review: bool = False) -> Plan:
+    """Convert an AuditReport into a Plan based on confidence filters.
+
+    Args:
+        report: Audit report to derive the plan from.
+        safe_only: If True, only include SAFE-tier candidates.
+        include_review: If True, explicitly include REVIEW-tier candidates
+            (ignored when safe_only is True).
+
+    Returns:
+        Plan containing the filtered candidates.
+    """
     allowed = {Confidence.SAFE}
     if not safe_only:
         if include_review:
@@ -408,6 +424,14 @@ def tui_cmd() -> None:
 
 
 def _human_size(size_bytes: int) -> str:
+    """Convert a byte size into a human-readable string.
+
+    Args:
+        size_bytes: Size in bytes.
+
+    Returns:
+        Human-readable size (e.g., "1.5 MB").
+    """
     size = float(size_bytes)
     for unit in ["B", "KB", "MB", "GB", "TB"]:
         if abs(size) < 1024.0:
@@ -417,6 +441,7 @@ def _human_size(size_bytes: int) -> str:
 
 
 def main() -> None:
+    """Application entry point. Ensures config exists and starts the CLI."""
     ensure_config()
     cli()
 

@@ -14,7 +14,14 @@ from bekas.runner import run_audit
 
 
 class TuiApp(App):  # type: ignore[type-arg]
-    """Interactive TUI for bekas."""
+    """Interactive TUI for bekas.
+
+    Displays a tree of plugins and their candidates on the left,
+    and candidate details in a table on the right.
+
+    Attributes:
+        audit_report: The most recent audit report, or None before the first run.
+    """
 
     CSS = """
     Screen { align: center middle; }
@@ -32,6 +39,11 @@ class TuiApp(App):  # type: ignore[type-arg]
     audit_report: reactive[AuditReport | None] = reactive(None)
 
     def compose(self) -> ComposeResult:
+        """Build the UI layout.
+
+        Returns:
+            ComposeResult yielding the widget tree.
+        """
         yield Header()
         with Horizontal():
             with Vertical(id="sidebar"):
@@ -43,11 +55,13 @@ class TuiApp(App):  # type: ignore[type-arg]
         yield Footer()
 
     def on_mount(self) -> None:
+        """Initialize the TUI and trigger the first audit refresh."""
         self.title = "bekas"
         self.sub_title = "Audit"
         self.action_refresh()
 
     def action_refresh(self) -> None:
+        """Run a fresh audit and repopulate the plugin tree."""
         plugins = discover_plugins()
         report = run_audit(plugins, serial=False)
         self.audit_report = report
@@ -63,6 +77,11 @@ class TuiApp(App):  # type: ignore[type-arg]
         )
 
     def on_tree_node_selected(self, event: Tree.NodeSelected) -> None:  # type: ignore[type-arg]
+        """Handle selection of a tree node and update the details table.
+
+        Args:
+            event: Tree node selection event.
+        """
         label = str(event.node.label)
         # If leaf, show candidate details; if branch, show plugin summary
         table = self.query_one("#candidate-table", DataTable)
@@ -85,6 +104,7 @@ class TuiApp(App):  # type: ignore[type-arg]
                 return
 
     def action_inspect(self) -> None:
+        """Display an inspection hint for the currently selected candidate."""
         table = self.query_one("#candidate-table", DataTable)
         cursor = table.cursor_coordinate
         # Textual Coordinate is never None but row can be -1 when empty
