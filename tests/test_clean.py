@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from unittest.mock import patch
 
@@ -11,6 +12,8 @@ from bekas.clean import (
     _group_by_category,
     _human_size,
     apply_plan,
+    typed_confirmation_gate,
+    validate_plan_freshness,
 )
 from bekas.models import Candidate, Confidence, Context, Plan, RemovalResult
 from bekas.plugin import Plugin
@@ -155,3 +158,124 @@ def test_apply_plan_yes_all_skips_input():
     # If yes_all is False and dry_run is False, it would call input() which blocks.
     result = apply_plan(plan, [plugin], ctx, yes_all=True)
     assert result.total_bytes_freed == 100
+
+
+# ── P1.2 typed confirmation gate ──────────────────────────────
+
+
+def test_confirmation_gate_yes_all_skips():
+    """yes_all=True skips gate."""
+    c = Candidate(id="x", category="c", size_bytes=100, path_or_handle="/x", confidence=Confidence.SAFE, reason="")
+    plan = Plan(audit_id="ad", candidates=[c])
+    assert typed_confirmation_gate(plan, quarantine_enabled=True, yes_all=True) is True
+
+
+def test_confirmation_gate_non_interactive_refuses():
+    """non_interactive without yes_all returns False."""
+    c = Candidate(id="x", category="c", size_bytes=100, path_or_handle="/x", confidence=Confidence.SAFE, reason="")
+    plan = Plan(audit_id="ad", candidates=[c])
+    assert typed_confirmation_gate(plan, quarantine_enabled=True, yes_all=False, non_interactive=True) is False
+
+
+def test_confirmation_gate_high_risk_requires_token(monkeypatch):
+    """Manual-tier triggers token requirement."""
+    c = Candidate(id="x", category="c", size_bytes=100, path_or_handle="/x", confidence=Confidence.MANUAL, reason="")
+    plan = Plan(audit_id="ad", candidates=[c])
+
+    def _fake_input(prompt=""):
+        return "ABCD"
+
+    monkeypatch.setattr("builtins.input", _fake_input)
+    import bekas.clean as clean_mod
+
+    orig_token = clean_mod.secrets.token_urlsafe
+    clean_mod.secrets.token_urlsafe = lambda n: "ABCD"
+    try:
+        assert typed_confirmation_gate(plan, quarantine_enabled=True) is True
+    finally:
+        clean_mod.secrets.token_urlsafe = orig_token
+
+
+def test_confirmation_gate_normal_requires_yes(monkeypatch):
+    """Normal (SAFE-only) plan requires typing 'yes'."""
+    c = Candidate(id="x", category="c", size_bytes=100, path_or_handle="/x", confidence=Confidence.SAFE, reason="")
+    plan = Plan(audit_id="ad", candidates=[c])
+    monkeypatch.setattr("builtins.input", lambda: "yes")
+    assert typed_confirmation_gate(plan, quarantine_enabled=True) is True
+    monkeypatch.setattr("builtins.input", lambda: "nope")
+    assert typed_confirmation_gate(plan, quarantine_enabled=True) is False
+
+
+# ── P1.5 plan re-validation ─────────────────────────────────
+
+
+def test_validate_freshness_skips_missing():
+    """Candidates with missing paths are skipped silently."""
+    c = Candidate(
+        id="missing",
+        category="c",
+        size_bytes=100,
+        path_or_handle="/does/not/exist/ever/12345",
+        confidence=Confidence.SAFE,
+        reason="",
+    )
+    plan = Plan(audit_id="ad", candidates=[c], fingerprints={"missing": {"exists": True, "size_bytes": 100}})
+    valid, skipped = validate_plan_freshness(plan)
+    assert len(valid) == 0
+    assert len(skipped) == 0
+
+
+def test_validate_freshness_warns_stale_size():
+    """Growing size triggers stale detection."""
+    import os as os_mod
+    import tempfile
+
+    with tempfile.NamedTemporaryFile(delete=False) as f:
+        f.write(b"small")
+        path = f.name
+    try:
+        c = Candidate(id="x", category="c", size_bytes=5, path_or_handle=path, confidence=Confidence.SAFE, reason="")
+        plan = Plan(audit_id="ad", candidates=[c], fingerprints={"x": {"exists": True, "size_bytes": 5}})
+        with open(path, "w") as f:
+            f.write("this is much bigger now")
+        valid, skipped = validate_plan_freshness(plan)
+        assert len(valid) == 0
+        assert any("stale" in s.lower() for s in skipped)
+    finally:
+        os_mod.unlink(path)
+
+
+def test_validate_freshness_force_stale():
+    """force_stale=True includes stale candidates."""
+    import os as os_mod
+    import tempfile
+
+    with tempfile.NamedTemporaryFile(delete=False) as f:
+        f.write(b"small")
+        f.flush()
+        path = f.name
+    try:
+        c = Candidate(id="x", category="c", size_bytes=5, path_or_handle=path, confidence=Confidence.SAFE, reason="")
+        plan = Plan(audit_id="ad", candidates=[c], fingerprints={"x": {"exists": True, "size_bytes": 5}})
+        with open(path, "w") as f:
+            f.write("this is much bigger now")
+        valid, skipped = validate_plan_freshness(plan, force_stale=True)
+        assert len(valid) == 1
+        assert any("forced" in s.lower() for s in skipped)
+    finally:
+        os_mod.unlink(path)
+
+
+def test_validate_freshness_warns_old_plan():
+    """Plan signed > 7 days ago gets a warning."""
+    c = Candidate(
+        id="x",
+        category="c",
+        size_bytes=5,
+        path_or_handle="/tmp/fake_file_12345_xyz",
+        confidence=Confidence.SAFE,
+        reason="",
+    )
+    plan = Plan(audit_id="ad", candidates=[c], signed_at=datetime.now(UTC) - timedelta(days=10))
+    valid, skipped = validate_plan_freshness(plan)
+    assert any("7 days" in s for s in skipped)

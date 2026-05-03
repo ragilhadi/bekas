@@ -37,6 +37,8 @@ class Candidate(BaseModel):
         path_or_handle: Filesystem path or opaque handle.
         confidence: Safety tier.
         reason: Human-readable explanation.
+        mtime: Optional last-modification timestamp (Unix epoch seconds).
+            Used for age-based sorting and freshness checks.
         metadata: Additional key-value data.
     """
 
@@ -48,6 +50,7 @@ class Candidate(BaseModel):
     path_or_handle: str
     confidence: Confidence
     reason: str
+    mtime: int | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -58,11 +61,18 @@ class Plan(BaseModel):
         audit_id: Identifier of the originating audit.
         created_at: When the plan was created.
         candidates: Candidates included in this plan.
+        fingerprints: Per-candidate freshness fingerprints keyed by candidate ID.
+            Each fingerprint is a dict of ``{"exists": bool, "size_bytes": int,
+            "mtime": int | None}`` for path-based candidates.
+        signed_at: Timestamp when the plan was cryptographically signed.
+            Used to warn on stale plans.
     """
 
     audit_id: str
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     candidates: list[Candidate] = Field(default_factory=list)
+    fingerprints: dict[str, dict[str, Any]] = Field(default_factory=dict)
+    signed_at: datetime | None = None
 
     def total_bytes(self) -> int:
         """Return the total size of all candidates in bytes.

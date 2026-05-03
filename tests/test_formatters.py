@@ -3,9 +3,17 @@
 from __future__ import annotations
 
 import json
-from datetime import UTC
+from datetime import UTC, datetime
 
-from bekas.formatters import _human_size, format_candidates, format_human, format_json, format_md
+from bekas.formatters import (
+    _human_size,
+    _sort_and_limit,
+    _totals_header,
+    format_candidates,
+    format_human,
+    format_json,
+    format_md,
+)
 from bekas.models import AuditReport, AuditSummary, Candidate, Confidence, Plan, RunResult, SystemInfo
 
 
@@ -40,6 +48,102 @@ def test_format_human_audit_report():
     assert "Audit complete" in text
     assert "docker.images" in text
     assert "Total reclaimable" in text
+
+
+def test_totals_header_renders():
+    """_totals_header produces headline block."""
+    report = AuditReport(
+        audit_id="ad_test",
+        started_at=datetime.now(UTC),
+        duration_ms=1234,
+        system=SystemInfo(os="linux", arch="x86_64", free_disk_bytes=1000),
+        plugins=[
+            {
+                "name": "a.b",
+                "candidates_found": 2,
+                "candidates": [
+                    Candidate(
+                        id="x",
+                        category="a.b",
+                        size_bytes=100,
+                        path_or_handle="/x",
+                        confidence=Confidence.SAFE,
+                        reason="r",
+                    ),
+                    Candidate(
+                        id="y",
+                        category="a.b",
+                        size_bytes=200,
+                        path_or_handle="/y",
+                        confidence=Confidence.REVIEW,
+                        reason="r",
+                    ),
+                ],
+            }
+        ],  # type: ignore[arg-type]
+        summary=AuditSummary(
+            total_candidates=2,
+            total_bytes=300,
+            by_confidence={
+                "safe": {"count": 1, "bytes": 100},
+                "review": {"count": 1, "bytes": 200},
+            },
+        ),
+    )
+    lines = _totals_header(report)
+    assert any("candidates" in line and "reclaimable" in line for line in lines)
+    assert any("SAFE" in line for line in lines)
+    assert any("REVIEW" in line for line in lines)
+
+
+def test_sort_by_size():
+    """Sort by size in descending order."""
+    candidates = [
+        Candidate(id="a", category="c", size_bytes=10, path_or_handle="/a", confidence=Confidence.SAFE, reason=""),
+        Candidate(id="b", category="c", size_bytes=100, path_or_handle="/b", confidence=Confidence.SAFE, reason=""),
+        Candidate(id="c", category="c", size_bytes=50, path_or_handle="/c", confidence=Confidence.SAFE, reason=""),
+    ]
+    result = _sort_and_limit(candidates, sort_by="size", top=2)
+    assert [c.id for c in result] == ["b", "c"]
+
+
+def test_sort_by_age():
+    """Sort by age (mtime ascending)."""
+    now = int(datetime.now(UTC).timestamp())
+    candidates = [
+        Candidate(
+            id="a",
+            category="c",
+            size_bytes=10,
+            path_or_handle="/a",
+            confidence=Confidence.SAFE,
+            reason="",
+            mtime=now - 10,
+        ),
+        Candidate(
+            id="b",
+            category="c",
+            size_bytes=10,
+            path_or_handle="/b",
+            confidence=Confidence.SAFE,
+            reason="",
+            mtime=now - 100,
+        ),
+    ]
+    result = _sort_and_limit(candidates, sort_by="age", top=2)
+    assert result[0].id == "b"
+    assert result[1].id == "a"
+
+
+def test_sort_by_tier():
+    """Sort by confidence tier."""
+    candidates = [
+        Candidate(id="m", category="c", size_bytes=10, path_or_handle="/m", confidence=Confidence.MANUAL, reason=""),
+        Candidate(id="s", category="c", size_bytes=10, path_or_handle="/s", confidence=Confidence.SAFE, reason=""),
+        Candidate(id="r", category="c", size_bytes=10, path_or_handle="/r", confidence=Confidence.REVIEW, reason=""),
+    ]
+    result = _sort_and_limit(candidates, sort_by="tier")
+    assert [c.id for c in result] == ["s", "r", "m"]
 
 
 def test_format_human_plan():

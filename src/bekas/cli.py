@@ -17,6 +17,7 @@ from bekas.config import (
 )
 from bekas.database import get_run, list_quarantine, list_runs
 from bekas.formatters import format_human, format_json
+from bekas.locking import AlreadyRunningError
 from bekas.models import AuditReport, Confidence, Context, Plan
 from bekas.plugin import Plugin, discover_plugins
 from bekas.quarantine import purge_old_quarantine, restore_from_quarantine
@@ -93,8 +94,12 @@ def cli(ctx: click.Context, profile: str | None, json_output: bool, verbose: boo
 @cli.command("audit")
 @click.option("--plugin", "plugins_filter", default=None, help="Comma-separated plugin names.")
 @click.option("--serial", is_flag=True, help="Run plugins serially.")
+@click.option("--sort-by", type=click.Choice(["size", "age", "tier"]), default=None, help="Sort candidates by key.")
+@click.option("--top", type=int, default=None, help="Only show top N candidates per plugin.")
 @click.pass_context
-def audit_cmd(ctx: click.Context, plugins_filter: str | None, serial: bool) -> None:
+def audit_cmd(
+    ctx: click.Context, plugins_filter: str | None, serial: bool, sort_by: str | None, top: int | None
+) -> None:
     """Run a read-only audit."""
     profile_name = ctx.obj.get("profile")
     all_plugins = _get_plugins()
@@ -109,7 +114,7 @@ def audit_cmd(ctx: click.Context, plugins_filter: str | None, serial: bool) -> N
     if ctx.obj.get("json"):
         click.echo(format_json(report))
     else:
-        click.echo(format_human(report))
+        click.echo(format_human(report, sort_by=sort_by, top=top))
 
     # Save report in context for chaining if needed
     ctx.obj["last_audit"] = report
@@ -120,8 +125,11 @@ def audit_cmd(ctx: click.Context, plugins_filter: str | None, serial: bool) -> N
 @click.option("--include-review", is_flag=True, help="Include review-tier items.")
 @click.option("--json", "json_output", is_flag=True, help="Output JSON.")
 @click.option("--save", type=click.Path(), default=None, help="Save signed plan to a file.")
+@click.option("--top", type=int, default=None, help="Only show top N candidates.")
 @click.pass_context
-def plan_cmd(ctx: click.Context, safe_only: bool, include_review: bool, json_output: bool, save: str | None) -> None:
+def plan_cmd(
+    ctx: click.Context, safe_only: bool, include_review: bool, json_output: bool, save: str | None, top: int | None
+) -> None:
     """Preview what clean would do."""
     profile_name = ctx.obj.get("profile")
     all_plugins = _get_plugins()
@@ -140,7 +148,7 @@ def plan_cmd(ctx: click.Context, safe_only: bool, include_review: bool, json_out
     if use_json:
         click.echo(format_json(plan))
     else:
-        click.echo(format_human(plan))
+        click.echo(format_human(plan, top=top))
 
 
 @cli.command("clean")
@@ -151,6 +159,7 @@ def plan_cmd(ctx: click.Context, safe_only: bool, include_review: bool, json_out
 @click.option("--non-interactive", is_flag=True, help="Non-interactive mode (requires --accept-categories).")
 @click.option("--accept-categories", default=None, help="Comma-separated categories for non-interactive mode.")
 @click.option("--plan-file", type=click.Path(exists=True), default=None, help="Apply a saved JSON plan file.")
+@click.option("--force-stale", is_flag=True, help="Apply a plan even if candidates have drifted.")
 @click.pass_context
 def clean_cmd(
     ctx: click.Context,
@@ -161,10 +170,16 @@ def clean_cmd(
     non_interactive: bool,
     accept_categories: str | None,
     plan_file: str | None,
+    force_stale: bool,
 ) -> None:
     """Remove approved candidates. Dry-run by default."""
     profile_name = ctx.obj.get("profile")
     profile = profile_for(profile_name)
+
+    # Non-interactive requires yes-all or accept-categories
+    if non_interactive and not (yes_all or accept_categories):
+        click.echo("Error: --non-interactive requires --yes-all or --accept-categories.")
+        sys.exit(2)
 
     if plan_file:
         with open(plan_file) as f:
@@ -191,10 +206,6 @@ def clean_cmd(
         click.echo(format_human(plan))
         return
 
-    if non_interactive and not accept_categories:
-        click.echo("Error: --non-interactive requires --accept-categories.")
-        sys.exit(1)
-
     # If non-interactive, we still filter to accepted categories
     if non_interactive and accept_categories:
         accepted = {c.strip() for c in accept_categories.split(",")}
@@ -203,15 +214,27 @@ def clean_cmd(
     ctx_obj = Context(dry_run=False, config=profile, verbose=ctx.obj.get("verbose", False))
     quarantine_enabled = profile.get("quarantine_enabled", True)
 
-    result = apply_plan(
-        plan,
-        all_plugins if not plan_file else _get_plugins(),
-        ctx_obj,
-        audit=report,
-        yes_all=yes_all or non_interactive,
-        quarantine_enabled=quarantine_enabled,
-        profile_name=profile_name,
-    )
+    # Acquire single-instance lock for mutating commands
+    from bekas.locking import acquire_lock
+
+    try:
+        lock = acquire_lock()
+    except AlreadyRunningError as exc:
+        click.echo(str(exc))
+        sys.exit(3)
+
+    with lock:
+        result = apply_plan(
+            plan,
+            _get_plugins(),
+            ctx_obj,
+            audit=report,
+            yes_all=yes_all or non_interactive,
+            quarantine_enabled=quarantine_enabled,
+            profile_name=profile_name,
+            non_interactive=non_interactive,
+            force_stale=force_stale,
+        )
 
     if ctx.obj.get("json"):
         click.echo(format_json(result))
@@ -291,7 +314,6 @@ def undo_cmd(ctx: click.Context, run_id: str | None) -> None:
 
     click.echo(f"Undo run {run_id}...")
 
-    # Parse per-candidate results and restore anything that was quarantined
     import json
 
     restored = 0
@@ -394,20 +416,62 @@ def plugins_disable(plugin_name: str) -> None:
     click.echo(f"Disable {plugin_name}: edit {config_path()} to remove from enabled_plugins.")
 
 
-@cli.command("config")
+@cli.command("doctor")
+@click.option("--json", "json_output", is_flag=True, help="Output JSON.")
+@click.option("--skip", default=None, help="Comma-separated checks to skip.")
+def doctor_cmd(json_output: bool, skip: str | None) -> None:
+    """Diagnose the bekas runtime environment."""
+    from bekas.doctor import exit_code, format_human, format_json, run_checks
+
+    skip_list = [s.strip() for s in (skip or "").split(",") if s.strip()]
+    results = run_checks(skip=skip_list)
+    if json_output:
+        click.echo(format_json(results))
+    else:
+        click.echo("bekas doctor")
+        click.echo(format_human(results))
+    sys.exit(exit_code(results))
+
+
+@cli.group("config", invoke_without_command=True)
 @click.pass_context
-def config_cmd(ctx: click.Context) -> None:
+def config_group(ctx: click.Context) -> None:
+    """Configuration management."""
+    if ctx.invoked_subcommand is None:
+        ctx.invoke(config_show, resolved=False)
+
+
+@config_group.command("show")
+@click.option("--resolved", is_flag=True, help="Show effective config after profile merge.")
+@click.pass_context
+def config_show(ctx: click.Context, resolved: bool) -> None:
     """Print current effective configuration."""
     cfg = load_config()
     profile = profile_for(ctx.obj.get("profile"))
     click.echo(f"Config file: {config_path()}")
     click.echo("")
-    click.echo("Active profile:")
-    for k, v in profile.items():
-        click.echo(f"  {k}: {v}")
-    click.echo("")
-    click.echo("Full config:")
+    if resolved:
+        click.echo("Effective profile (merged):")
+        for k, v in profile.items():
+            click.echo(f"  {k}: {v}")
+        click.echo("")
+    else:
+        click.echo("Full config:")
     click.echo(json.dumps(cfg, indent=2))
+
+
+@config_group.command("validate")
+def config_validate() -> None:
+    """Validate the current configuration file."""
+    try:
+        cfg = load_config()
+        if not isinstance(cfg, dict):
+            click.echo("Error: config is not a valid dictionary.")
+            sys.exit(1)
+        click.echo("Config OK.")
+    except Exception as exc:
+        click.echo(f"Config validation error: {exc}")
+        sys.exit(1)
 
 
 @cli.command("tui")

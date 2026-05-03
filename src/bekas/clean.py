@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
+import os
+import secrets
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from bekas.config import profile_for, quarantine_dir
 from bekas.database import log_run
-from bekas.models import AuditReport, Candidate, Context, Plan, RemovalResult, RunResult
+from bekas.models import AuditReport, Candidate, Confidence, Context, Plan, RemovalResult, RunResult
 from bekas.plugin import Plugin
 from bekas.quarantine import move_to_quarantine, purge_old_quarantine
 from bekas.safety import is_excluded
@@ -46,6 +48,154 @@ def _group_by_category(candidates: list[Candidate]) -> dict[str, list[Candidate]
     return groups
 
 
+def _human_size(size_bytes: int) -> str:
+    """Convert a byte size into a human-readable string.
+
+    Args:
+        size_bytes: Size in bytes.
+
+    Returns:
+        Human-readable size (e.g., "1.5 MB").
+    """
+    size = float(size_bytes)
+    for unit in ["B", "KB", "MB", "GB", "TB"]:
+        if abs(size) < 1024.0:
+            return f"{size:.1f} {unit}"
+        size /= 1024.0
+    return f"{size:.1f} PB"
+
+
+def validate_plan_freshness(plan: Plan, force_stale: bool = False) -> tuple[list[Candidate], list[str]]:
+    """Re-stat each candidate in a plan and abort or warn on drift.
+
+    For each candidate, recompute the cheap fingerprint ``(exists, size_bytes, mtime)``
+    and compare it to the stored fingerprint (if available). Candidates whose paths
+    no longer exist are skipped silently. Candidates that grew or have a newer mtime
+    are skipped unless ``force_stale`` is True.
+
+    Args:
+        plan: Plan to validate.
+        force_stale: If True, proceed even with stale candidates.
+
+    Returns:
+        Tuple of ``(valid_candidates, skip_reasons)``. ``valid_candidates`` are safe to
+        apply. ``skip_reasons`` are human-readable strings for the audit log.
+    """
+    valid: list[Candidate] = []
+    skipped: list[str] = []
+    now = datetime.now(UTC)
+
+    # Warn if plan is older than 7 days
+    if plan.signed_at is not None and (now - plan.signed_at) > timedelta(days=7):
+        skipped.append(f"Plan signed on {plan.signed_at.isoformat()} (>7 days old)")
+
+    for c in plan.candidates:
+        path = Path(c.path_or_handle)
+        fp = plan.fingerprints.get(c.id, {})
+
+        # Path no longer exists → skip silently
+        if not path.exists():
+            continue
+
+        try:
+            stat = path.stat()
+            current_size = stat.st_size if path.is_file() else c.size_bytes
+            current_mtime = int(stat.st_mtime)
+        except (OSError, ValueError):
+            continue
+
+        old_size = fp.get("size_bytes")
+        old_mtime = fp.get("mtime")
+
+        # No fingerprint stored → assume valid but warn
+        if old_size is None and old_mtime is None:
+            valid.append(c)
+            continue
+
+        grew = old_size is not None and current_size > old_size
+        newer = old_mtime is not None and current_mtime > old_mtime
+
+        if grew or newer:
+            reason_parts: list[str] = []
+            if grew:
+                reason_parts.append(f"size changed {_human_size(old_size or 0)} → {_human_size(current_size)}")
+            if newer:
+                reason_parts.append("mtime newer")
+            reason = f"stale: {c.id} — {', '.join(reason_parts)}"
+            if force_stale:
+                valid.append(c)
+                skipped.append(f"{reason} (forced)")
+            else:
+                skipped.append(reason)
+            continue
+
+        # Shrunk or unchanged → proceed
+        valid.append(c)
+
+    return valid, skipped
+
+
+def typed_confirmation_gate(
+    plan: Plan,
+    quarantine_enabled: bool,
+    yes_all: bool = False,
+    non_interactive: bool = False,
+) -> bool:
+    """Show a summary and require typed user confirmation before destructive action.
+
+    For normal plans, requires typing ``"yes"``. For high-risk plans (anything
+    ``MANUAL``-tier or hard-delete on > 5 GB), requires a random 4-character token.
+
+    Args:
+        plan: Plan to confirm.
+        quarantine_enabled: Whether quarantine is active.
+        yes_all: If True, skip the gate entirely.
+        non_interactive: If True and ``yes_all`` is False, exit without changes.
+
+    Returns:
+        True if the user confirmed, False otherwise.
+    """
+    if yes_all:
+        return True
+
+    if non_interactive:
+        return False
+
+    groups = _group_by_category(plan.candidates)
+    total_items = len(plan.candidates)
+    total_size = plan.total_bytes()
+
+    lines: list[str] = []
+    lines.append(f"\nAbout to remove {total_items} items, {_human_size(total_size)} total:")
+    for cat, items in groups.items():
+        size = sum(c.size_bytes for c in items)
+        action = "quarantine" if quarantine_enabled else "permanent"
+        lines.append(f"  {cat:30s} {len(items):3d} items · {_human_size(size):>8s}  → {action}")
+
+    qdir = quarantine_dir()
+    lines.append(f"\nQuarantine: {'enabled' if quarantine_enabled else 'disabled'} ({qdir})")
+    from bekas.database import runs_db_path
+
+    lines.append(f"Undo log:   {runs_db_path()}")
+
+    # Determine if high-risk
+    has_manual = any(c.confidence == Confidence.MANUAL for c in plan.candidates)
+    hard_delete_gb = sum(c.size_bytes for c in plan.candidates if c.confidence != Confidence.SAFE) / (1024**3)
+    high_risk = has_manual or (not quarantine_enabled and hard_delete_gb > 5)
+
+    if high_risk:
+        token = secrets.token_urlsafe(4)[:4].upper()
+        lines.append(f"\n⚠  HIGH RISK detected. Type the token '{token}' to proceed, or Ctrl-C to abort:")
+        print("\n".join(lines))
+        user_input = input("Token: ").strip().upper()
+        return user_input == token
+
+    lines.append('\nType "yes" to proceed, or Ctrl-C to abort:')
+    print("\n".join(lines))
+    user_input = input().strip().lower()
+    return user_input == "yes"
+
+
 def apply_plan(
     plan: Plan,
     plugins: list[Plugin],
@@ -54,6 +204,8 @@ def apply_plan(
     yes_all: bool = False,
     quarantine_enabled: bool = False,
     profile_name: str | None = None,
+    non_interactive: bool = False,
+    force_stale: bool = False,
 ) -> RunResult:
     """Apply a cleanup plan and return the run result.
 
@@ -69,6 +221,8 @@ def apply_plan(
         yes_all: If True, skip interactive per-category confirmation.
         quarantine_enabled: If True, quarantine instead of deleting when supported.
         profile_name: Optional profile name to load settings from.
+        non_interactive: If True, requires ``yes_all`` or exits.
+        force_stale: If True, apply even if plan candidates have drifted.
 
     Returns:
         RunResult summarizing the operation.
@@ -78,8 +232,34 @@ def apply_plan(
     quarantine_enabled = quarantine_enabled or profile.get("quarantine_enabled", False)
     retention = profile.get("quarantine_retention_days", 30)
 
+    # Re-validate plan freshness
+    if plan.fingerprints:
+        valid, skipped = validate_plan_freshness(plan, force_stale=force_stale)
+        if skipped and ctx.verbose:
+            for reason in skipped:
+                print(f"  [plan validation] {reason}")
+        plan.candidates = valid
+
     # Purge old quarantine first
     purge_old_quarantine(retention)
+
+    if not plan.candidates:
+        return RunResult(
+            run_id=f"run_{uuid.uuid4().hex[:8]}",
+            audit_id=plan.audit_id,
+            per_candidate=[],
+            total_bytes_freed=0,
+        )
+
+    # Typed confirmation gate
+    if not ctx.dry_run:
+        if non_interactive and not yes_all:
+            print("Error: --non-interactive requires --yes-all.")
+            os._exit(2)  # noqa: S607
+        confirmed = typed_confirmation_gate(plan, quarantine_enabled, yes_all=yes_all, non_interactive=non_interactive)
+        if not confirmed:
+            print("Aborted. No changes were made.")
+            os._exit(1)  # noqa: S607
 
     groups = _group_by_category(plan.candidates)
     per_candidate: list[tuple[Candidate, RemovalResult]] = []
@@ -89,7 +269,7 @@ def apply_plan(
     for cat, items in groups.items():
         size = sum(c.size_bytes for c in items)
         if not yes_all and not ctx.dry_run:
-            # Interactive prompt per category
+            # Interactive prompt per category (secondary confirmation)
             resp = input(f"About to delete {len(items)} {cat} items ({_human_size(size)}). Confirm? [y/N] ")
             if resp.strip().lower() != "y":
                 continue
@@ -172,20 +352,3 @@ def _generic_remove(candidate: Candidate, ctx: Context, quarantine_enabled: bool
         return RemovalResult(success=True, bytes_freed=candidate.size_bytes, log="deleted")
     except Exception as exc:
         return RemovalResult(success=False, bytes_freed=0, log=str(exc))
-
-
-def _human_size(size_bytes: int) -> str:
-    """Convert a byte size into a human-readable string.
-
-    Args:
-        size_bytes: Size in bytes.
-
-    Returns:
-        Human-readable size (e.g., "1.5 MB").
-    """
-    size = float(size_bytes)
-    for unit in ["B", "KB", "MB", "GB", "TB"]:
-        if abs(size) < 1024.0:
-            return f"{size:.1f} {unit}"
-        size /= 1024.0
-    return f"{size:.1f} PB"

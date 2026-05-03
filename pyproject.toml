@@ -61,6 +61,7 @@ select = ["E", "F", "I", "W", "UP", "B", "C4", "SIM", "ARG"]
 "src/bekas/cli.py" = ["ARG001"]
 "src/bekas/runner.py" = ["SIM105"]
 "src/bekas/clean.py" = ["ARG001"]
+"src/bekas/locking.py" = ["SIM115"]
 "tests/**/*.py" = ["ARG001", "ARG002", "ARG005", "E501", "F841", "UP017"]
 
 [tool.ruff.lint.pydocstyle]
