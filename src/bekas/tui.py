@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+
 from textual.app import App, ComposeResult
 from textual.containers import Horizontal, Vertical
 from textual.reactive import reactive
@@ -24,7 +26,7 @@ class TuiApp(App):  # type: ignore[type-arg]
     """
 
     CSS = """
-    Screen { align: center middle; }
+    Screen { align: left top; }
     #sidebar { width: 30%; height: 100%; border: solid green; }
     #main { width: 70%; height: 100%; border: solid blue; }
     .candidate { padding: 1 2; }
@@ -51,29 +53,46 @@ class TuiApp(App):  # type: ignore[type-arg]
                 yield Tree("Plugins", id="plugin-tree")
             with Vertical(id="main"):
                 yield Label("Select a plugin to see candidates.", id="detail-label")
-                yield DataTable(id="candidate-table")
+                yield DataTable(id="candidate-table", cursor_type="row")
         yield Footer()
 
     def on_mount(self) -> None:
-        """Initialize the TUI and trigger the first audit refresh."""
+        """Initialize the TUI, set up the table, and trigger the first audit."""
         self.title = "bekas"
         self.sub_title = "Audit"
+        table = self.query_one("#candidate-table", DataTable)
+        table.add_columns("ID", "Size", "Confidence", "Reason")
         self.action_refresh()
 
     def action_refresh(self) -> None:
-        """Run a fresh audit and repopulate the plugin tree."""
+        """Run a fresh audit in the background and repopulate the plugin tree."""
+        self.query_one("#detail-label", Label).update("Running audit...")
+        self.run_worker(self._do_refresh, exclusive=True)
+
+    async def _do_refresh(self) -> None:
+        """Background worker that performs the audit without blocking the UI."""
         plugins = discover_plugins()
-        report = run_audit(plugins, serial=False)
+        report = await asyncio.to_thread(run_audit, plugins, serial=False)
         self.audit_report = report
+        self._populate_tree()
+
+    def _populate_tree(self) -> None:
+        """Populate the plugin tree from the current audit report."""
+        report = self.audit_report
+        if report is None:
+            return
         tree = self.query_one("#plugin-tree", Tree)
         tree.clear()
-        tree.root.add("Plugins")
         for pr in report.plugins:
+            if not pr.candidates:
+                continue
             node = tree.root.add(f"{pr.name} ({pr.candidates_found})")
             for c in pr.candidates:
                 node.add_leaf(f"{c.id} — {_human_size(c.size_bytes)}")
+        tree.root.expand()
+        active_plugins = sum(1 for pr in report.plugins if pr.candidates)
         self.query_one("#detail-label", Label).update(
-            f"Audit complete: {len(report.plugins)} plugins, {_human_size(report.summary.total_bytes)} reclaimable."
+            f"Audit complete: {active_plugins} plugins, {_human_size(report.summary.total_bytes)} reclaimable."
         )
 
     def on_tree_node_selected(self, event: Tree.NodeSelected) -> None:  # type: ignore[type-arg]
@@ -83,31 +102,57 @@ class TuiApp(App):  # type: ignore[type-arg]
             event: Tree node selection event.
         """
         label = str(event.node.label)
-        # If leaf, show candidate details; if branch, show plugin summary
         table = self.query_one("#candidate-table", DataTable)
         table.clear()
         table.add_columns("ID", "Size", "Confidence", "Reason")
         report = self.audit_report
         if report is None:
             return
+
+        # Leaf nodes represent individual candidates
+        if event.node.is_leaf:
+            for pr in report.plugins:
+                for c in pr.candidates:
+                    if label.startswith(c.id + " —"):
+                        table.add_row(
+                            c.id,
+                            _human_size(c.size_bytes),
+                            c.confidence.value,
+                            c.reason,
+                        )
+                        self.query_one("#detail-label", Label).update(f"Selected: {c.id}")
+                        return
+            return
+
+        # Branch nodes represent plugins
         for pr in report.plugins:
-            for c in pr.candidates:
-                if label.startswith(c.id + " —"):
-                    table.add_row(c.id, _human_size(c.size_bytes), c.confidence.value, c.reason)
-                    self.query_one("#detail-label", Label).update(f"Selected: {c.id}")
-                    return
-            # Show all candidates for plugin
             if pr.name in label:
                 for c in pr.candidates:
-                    table.add_row(c.id, _human_size(c.size_bytes), c.confidence.value, c.reason)
+                    table.add_row(
+                        c.id,
+                        _human_size(c.size_bytes),
+                        c.confidence.value,
+                        c.reason,
+                    )
                 self.query_one("#detail-label", Label).update(f"Plugin: {pr.name}")
                 return
+
+        # Root selected — show all candidates
+        if label == "Plugins":
+            for pr in report.plugins:
+                for c in pr.candidates:
+                    table.add_row(
+                        c.id,
+                        _human_size(c.size_bytes),
+                        c.confidence.value,
+                        c.reason,
+                    )
+            self.query_one("#detail-label", Label).update("All candidates")
 
     def action_inspect(self) -> None:
         """Display an inspection hint for the currently selected candidate."""
         table = self.query_one("#candidate-table", DataTable)
         cursor = table.cursor_coordinate
-        # Textual Coordinate is never None but row can be -1 when empty
         if cursor.row < 0 or cursor.row >= table.row_count:
             return
         try:
