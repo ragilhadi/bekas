@@ -31,6 +31,7 @@ bekas = "bekas.cli:main"
 [project.entry-points."bekas.plugins"]
 docker_images = "bekas.plugins.docker_images:DockerImagesPlugin"
 docker_containers = "bekas.plugins.docker_containers:DockerContainersPlugin"
+docker_buildx = "bekas.plugins.docker_buildx:DockerBuildxPlugin"
 python_venvs = "bekas.plugins.python_venvs:PythonVenvsPlugin"
 dotfiles_backups = "bekas.plugins.dotfiles_backups:DotfilesBackupsPlugin"
 node_modules = "bekas.plugins.node_modules:NodeModulesPlugin"
@@ -40,6 +41,9 @@ python_cache = "bekas.plugins.python_cache:PythonCachePlugin"
 downloads = "bekas.plugins.downloads:DownloadsPlugin"
 screenshots = "bekas.plugins.screenshots:ScreenshotsPlugin"
 system_tmp = "bekas.plugins.system_tmp:SystemTmpPlugin"
+pip_cache = "bekas.plugins.pip_cache:PipCachePlugin"
+xcode_derived_data = "bekas.plugins.xcode_derived_data:XcodeDerivedDataPlugin"
+system_trash = "bekas.plugins.system_trash:SystemTrashPlugin"
 
 [build-system]
 requires = ["hatchling"]
@@ -57,7 +61,7 @@ select = ["E", "F", "I", "W", "UP", "B", "C4", "SIM", "ARG"]
 
 [tool.ruff.lint.per-file-ignores]
 "src/bekas/plugin.py" = ["ARG002", "SIM110"]
-"src/bekas/plugins/*.py" = ["ARG002", "SIM105"]
+"src/bekas/plugins/*.py" = ["ARG002", "SIM105", "B904", "SIM115"]
 "src/bekas/cli.py" = ["ARG001"]
 "src/bekas/runner.py" = ["SIM105"]
 "src/bekas/clean.py" = ["ARG001"]
