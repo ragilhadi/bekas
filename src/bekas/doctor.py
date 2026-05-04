@@ -301,10 +301,7 @@ def format_json(results: list[CheckResult]) -> str:
     Returns:
         Indented JSON string.
     """
-    data = [
-        {"check": r.name, "status": r.status, "message": r.message, "detail": r.detail}
-        for r in results
-    ]
+    data = [{"check": r.name, "status": r.status, "message": r.message, "detail": r.detail} for r in results]
     return json.dumps(data, indent=2)
 
 
