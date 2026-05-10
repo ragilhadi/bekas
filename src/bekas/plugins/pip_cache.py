@@ -12,7 +12,7 @@ from collections.abc import Iterator
 from pathlib import Path
 
 from bekas.models import Candidate, Confidence, Context, RemovalResult
-from bekas.plugin import Plugin
+from bekas.plugin import Capabilities, Plugin
 
 
 class PipCachePlugin(Plugin):
@@ -32,6 +32,7 @@ class PipCachePlugin(Plugin):
     name = "pip.cache"
     description = "Finds the pip wheel/http cache."
     requires_commands = []
+    capabilities = Capabilities(quarantine=False, estimated_runtime="fast")
 
     def is_available(self, ctx: Context) -> bool:
         """Check if pip cache directory exists.
@@ -108,14 +109,6 @@ class PipCachePlugin(Plugin):
             undo_token=None,
             log="; ".join(logs),
         )
-
-    def supports_quarantine(self) -> bool:
-        """Return False because cache is not worth quarantining.
-
-        Returns:
-            False.
-        """
-        return False
 
     def supports_undo(self) -> bool:
         """Return False because cache cannot be undone.

@@ -21,12 +21,11 @@ def test_cli_tui_import_failure(runner, monkeypatch):
 
 
 def test_cli_config_validate_bad_config(runner, monkeypatch, tmp_path):
-    """Make load_config return a non-dict so validation fails."""
-    # Patch the load_config reference inside cli.py's namespace
-    with patch("bekas.cli.load_config", return_value=[]):
+    """Simulate a validation failure."""
+    with patch("bekas.cli.validate_config_file", return_value=(False, "Config validation error: invalid")):
         result = runner.invoke(cli, ["config", "validate"])
         assert result.exit_code == 1
-        assert "not a valid dictionary" in result.output.lower()
+        assert "config validation error" in result.output.lower()
 
 
 def test_cli_clean_with_plan_file_tampered(runner, monkeypatch, tmp_path):

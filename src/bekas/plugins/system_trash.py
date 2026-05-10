@@ -16,7 +16,7 @@ from collections.abc import Iterator
 from pathlib import Path
 
 from bekas.models import Candidate, Confidence, Context, RemovalResult
-from bekas.plugin import Plugin
+from bekas.plugin import Capabilities, Plugin
 
 
 class SystemTrashPlugin(Plugin):
@@ -33,6 +33,7 @@ class SystemTrashPlugin(Plugin):
     name = "system.trash"
     description = "Finds items in the Trash / Recycle Bin."
     requires_commands = []
+    capabilities = Capabilities(quarantine=False, estimated_runtime="fast")
 
     def discover(self, ctx: Context) -> Iterator[Candidate]:
         """Yield trash item candidates.
@@ -82,14 +83,6 @@ class SystemTrashPlugin(Plugin):
             return RemovalResult(success=True, bytes_freed=size, log="Deleted from trash")
         except Exception as exc:
             return RemovalResult(success=False, bytes_freed=0, log=str(exc))
-
-    def supports_quarantine(self) -> bool:
-        """Return False — items are already in Trash.
-
-        Returns:
-            False.
-        """
-        return False
 
     def supports_undo(self) -> bool:
         """Return False — undo not supported.

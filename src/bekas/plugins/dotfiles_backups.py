@@ -7,7 +7,7 @@ from collections.abc import Iterator
 from pathlib import Path
 
 from bekas.models import Candidate, Confidence, Context, RemovalResult
-from bekas.plugin import Plugin
+from bekas.plugin import Capabilities, Plugin
 
 
 class DotfilesBackupsPlugin(Plugin):
@@ -26,6 +26,7 @@ class DotfilesBackupsPlugin(Plugin):
     name = "dotfiles.backups"
     description = "Finds old dotfile backup files like .zshrc.backup-*, .bashrc.bak, etc."
     requires_commands = []
+    capabilities = Capabilities(quarantine=True, estimated_runtime="fast")
 
     # Patterns for backup files
     PATTERNS = [
@@ -94,14 +95,6 @@ class DotfilesBackupsPlugin(Plugin):
             Whether undo is supported.
         """
         return False
-
-    def supports_quarantine(self) -> bool:
-        """Return True because backup files can be quarantined.
-
-        Returns:
-            Whether quarantine is supported.
-        """
-        return True
 
     def quarantine(
         self,

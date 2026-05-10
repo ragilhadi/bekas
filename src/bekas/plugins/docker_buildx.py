@@ -15,7 +15,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from bekas.models import Candidate, Confidence, Context, RemovalResult
-from bekas.plugin import Plugin
+from bekas.plugin import Capabilities, Plugin
 
 
 class DockerBuildxPlugin(Plugin):
@@ -35,6 +35,7 @@ class DockerBuildxPlugin(Plugin):
     name = "docker.buildx.cache"
     description = "Finds stale Docker buildx cache entries."
     requires_commands = ["docker"]
+    capabilities = Capabilities(requires_cli=("docker",), quarantine=False, estimated_runtime="medium")
 
     def is_available(self, ctx: Context) -> bool:
         """Check if docker is on PATH.
@@ -103,14 +104,6 @@ class DockerBuildxPlugin(Plugin):
             undo_token=None,
             log=proc.stdout + proc.stderr,
         )
-
-    def supports_quarantine(self) -> bool:
-        """Return False because cache cannot be quarantined.
-
-        Returns:
-            Whether quarantine is supported.
-        """
-        return False
 
     def supports_undo(self) -> bool:
         """Return False because cache cannot be undone.

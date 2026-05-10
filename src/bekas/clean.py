@@ -10,6 +10,7 @@ from pathlib import Path
 
 from bekas.config import profile_for, quarantine_dir
 from bekas.database import log_run
+from bekas.events import Event, log_event
 from bekas.models import AuditReport, Candidate, Confidence, Context, Plan, RemovalResult, RunResult
 from bekas.plugin import Plugin
 from bekas.quarantine import move_to_quarantine, purge_old_quarantine
@@ -229,8 +230,9 @@ def apply_plan(
     """
     _ = audit  # reserved for future use
     profile = profile_for(profile_name)
-    quarantine_enabled = quarantine_enabled or profile.get("quarantine_enabled", False)
-    retention = profile.get("quarantine_retention_days", 30)
+    profile_dict = profile.model_dump() if hasattr(profile, "model_dump") else profile
+    quarantine_enabled = quarantine_enabled or profile_dict.get("quarantine_enabled", False)
+    retention = profile_dict.get("quarantine_retention_days", 30)
 
     # Re-validate plan freshness
     if plan.fingerprints:
@@ -308,6 +310,21 @@ def apply_plan(
     )
     if not ctx.dry_run:
         log_run(run_result)
+        quarantined = sum(1 for _, r in per_candidate if r.log == "quarantined")
+        deleted = sum(1 for _, r in per_candidate if r.log == "deleted")
+        errors = [r.log for _, r in per_candidate if not r.success]
+        log_event(
+            Event(
+                event="clean.apply",
+                run_id=run_id,
+                profile=profile_name or "default",
+                items_total=len(per_candidate),
+                items_quarantined=quarantined,
+                items_deleted=deleted,
+                bytes_reclaimed=total_freed,
+                errors=errors,
+            )
+        )
     return run_result
 
 

@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from bekas.models import Candidate, Confidence, Context, RemovalResult
-from bekas.plugin import Plugin
+from bekas.plugin import Capabilities, Plugin
 
 
 class GitBranchesPlugin(Plugin):
@@ -26,6 +26,7 @@ class GitBranchesPlugin(Plugin):
     name = "git.branches"
     description = "Finds fully merged local git branches older than a threshold."
     requires_commands = ["git"]
+    capabilities = Capabilities(requires_cli=("git",), quarantine=False, estimated_runtime="medium")
 
     def discover(self, ctx: Context) -> Iterator[Candidate]:
         """Yield stale git branch candidates.
@@ -98,14 +99,6 @@ class GitBranchesPlugin(Plugin):
 
         Returns:
             Whether undo is supported.
-        """
-        return False
-
-    def supports_quarantine(self) -> bool:
-        """Return False because branches cannot be quarantined.
-
-        Returns:
-            Whether quarantine is supported.
         """
         return False
 

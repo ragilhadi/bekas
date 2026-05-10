@@ -10,7 +10,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from bekas.models import Candidate, Confidence, Context, RemovalResult
-from bekas.plugin import Plugin
+from bekas.plugin import Capabilities, Plugin
 
 
 class SystemTmpPlugin(Plugin):
@@ -28,6 +28,7 @@ class SystemTmpPlugin(Plugin):
     name = "system.tmp"
     description = "Finds old temporary files owned by the current user."
     requires_commands = []
+    capabilities = Capabilities(quarantine=False, estimated_runtime="fast")
 
     def discover(self, ctx: Context) -> Iterator[Candidate]:
         """Yield old temporary file candidates.

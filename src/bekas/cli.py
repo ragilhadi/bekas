@@ -14,8 +14,11 @@ from bekas.config import (
     is_plugin_enabled,
     load_config,
     profile_for,
+    resolved_config,
+    validate_config_file,
 )
 from bekas.database import get_run, list_quarantine, list_runs
+from bekas.events import read_events
 from bekas.formatters import format_human, format_json
 from bekas.locking import AlreadyRunningError
 from bekas.models import AuditReport, Confidence, Context, Plan
@@ -93,9 +96,17 @@ def cli(ctx: click.Context, profile: str | None, json_output: bool, verbose: boo
 @click.option("--serial", is_flag=True, help="Run plugins serially.")
 @click.option("--sort-by", type=click.Choice(["size", "age", "tier"]), default=None, help="Sort candidates by key.")
 @click.option("--top", type=int, default=None, help="Only show top N candidates per plugin.")
+@click.option("--no-cache", is_flag=True, help="Bypass the audit cache.")
+@click.option("--rebuild-cache", is_flag=True, help="Clear and rebuild the audit cache.")
 @click.pass_context
 def audit_cmd(
-    ctx: click.Context, plugins_filter: str | None, serial: bool, sort_by: str | None, top: int | None
+    ctx: click.Context,
+    plugins_filter: str | None,
+    serial: bool,
+    sort_by: str | None,
+    top: int | None,
+    no_cache: bool,
+    rebuild_cache: bool,
 ) -> None:
     """Run a read-only audit."""
     profile_name = ctx.obj.get("profile")
@@ -106,7 +117,13 @@ def audit_cmd(
         all_plugins = [p for p in all_plugins if p.name in names]
 
     click.echo("Running audit (this may take 30–90 seconds)...")
-    report = run_audit(all_plugins, profile_name=profile_name, serial=serial)
+    report = run_audit(
+        all_plugins,
+        profile_name=profile_name,
+        serial=serial,
+        no_cache=no_cache,
+        rebuild_cache=rebuild_cache,
+    )
 
     if ctx.obj.get("json"):
         click.echo(format_json(report))
@@ -123,14 +140,21 @@ def audit_cmd(
 @click.option("--json", "json_output", is_flag=True, help="Output JSON.")
 @click.option("--save", type=click.Path(), default=None, help="Save signed plan to a file.")
 @click.option("--top", type=int, default=None, help="Only show top N candidates.")
+@click.option("--no-cache", is_flag=True, help="Bypass the audit cache.")
 @click.pass_context
 def plan_cmd(
-    ctx: click.Context, safe_only: bool, include_review: bool, json_output: bool, save: str | None, top: int | None
+    ctx: click.Context,
+    safe_only: bool,
+    include_review: bool,
+    json_output: bool,
+    save: str | None,
+    top: int | None,
+    no_cache: bool,
 ) -> None:
     """Preview what clean would do."""
     profile_name = ctx.obj.get("profile")
     all_plugins = _get_plugins()
-    report = run_audit(all_plugins, profile_name=profile_name)
+    report = run_audit(all_plugins, profile_name=profile_name, no_cache=no_cache)
     plan = _audit_to_plan(report, safe_only=safe_only, include_review=include_review)
 
     if save:
@@ -208,8 +232,8 @@ def clean_cmd(
         accepted = {c.strip() for c in accept_categories.split(",")}
         plan.candidates = [c for c in plan.candidates if c.category.split(".")[0] in accepted]
 
-    ctx_obj = Context(dry_run=False, config=profile, verbose=ctx.obj.get("verbose", False))
-    quarantine_enabled = profile.get("quarantine_enabled", True)
+    ctx_obj = Context(dry_run=False, config=profile.model_dump(), verbose=ctx.obj.get("verbose", False))
+    quarantine_enabled = profile.quarantine_enabled
 
     # Acquire single-instance lock for mutating commands
     from bekas.locking import acquire_lock
@@ -265,8 +289,10 @@ def inspect_cmd(ctx: click.Context, candidate_id: str) -> None:
 
 @cli.command("history")
 @click.argument("run_id", required=False)
+@click.option("--since", type=int, default=None, help="Only show events from the last N hours.")
+@click.option("--json", "json_output", is_flag=True, help="Output JSON.")
 @click.pass_context
-def history_cmd(ctx: click.Context, run_id: str | None) -> None:
+def history_cmd(ctx: click.Context, run_id: str | None, since: int | None, json_output: bool) -> None:
     """List past actions or show details of a specific run."""
     if run_id:
         run = get_run(run_id)
@@ -276,17 +302,23 @@ def history_cmd(ctx: click.Context, run_id: str | None) -> None:
         click.echo(f"Run {run['run_id']} at {run['timestamp']}")
         click.echo(f"Audit ID: {run['audit_id']}")
         click.echo(f"Total freed: {_human_size(run['total_bytes_freed'])}")
-        # Could pretty-print plan_json / results_json here
-    else:
-        runs = list_runs()
-        if not runs:
-            click.echo("No history yet.")
-            return
-        click.echo(f"{'Run ID':12s} {'Time':20s} {'Audit ID':12s} {'Freed':>12s}")
-        for r in runs:
-            click.echo(
-                f"{r['run_id']:12s} {r['timestamp']:20s} {r['audit_id']:12s} {_human_size(r['total_bytes_freed']):>12s}"
-            )
+        return
+
+    events = read_events(since_hours=since)
+    if not events:
+        click.echo("No history yet.")
+        return
+
+    if json_output:
+        click.echo(json.dumps(events, indent=2))
+        return
+
+    click.echo(f"{'Run ID':18s} {'Time':20s} {'Event':18s} {'Items':>6s} {'Freed':>12s}")
+    for ev in events[:50]:
+        click.echo(
+            f"{ev.get('run_id',''):18s} {ev.get('ts',''):20s} {ev.get('event',''):18s} "
+            f"{ev.get('items_total',0):>6d} {_human_size(ev.get('bytes_reclaimed',0)):>12s}"
+        )
 
 
 @cli.command("undo")
@@ -386,17 +418,21 @@ def plugins_group() -> None:
 @plugins_group.command("list")
 @click.pass_context
 def plugins_list(ctx: click.Context) -> None:
-    """List installed plugins and their availability."""
+    """List installed plugins and their capabilities."""
     profile_name = ctx.obj.get("profile")
     profile = profile_for(profile_name)
-    patterns = profile.get("enabled_plugins", ["*"])
+    patterns = profile.enabled_plugins
     all_plugins = _get_plugins()
-    click.echo(f"{'Plugin':30s} {'Available':10s} {'Enabled':10s}")
+    click.echo(f"{'Plugin':30s} {'Available':10s} {'Enabled':10s} {'Quar':6s} {'Runtime':8s}")
     for p in all_plugins:
-        avail = "yes" if p.is_available(Context(dry_run=True, config=profile)) else "no"
+        avail = "yes" if p.is_available(Context(dry_run=True, config=profile.model_dump())) else "no"
         enabled = "yes" if is_plugin_enabled(patterns, p.name) else "no"
-        click.echo(f"{p.name:30s} {avail:10s} {enabled:10s}")
+        quar = "yes" if p.capabilities.quarantine else "no"
+        runtime = p.capabilities.estimated_runtime
+        click.echo(f"{p.name:30s} {avail:10s} {enabled:10s} {quar:6s} {runtime:8s}")
         click.echo(f"  {p.description}")
+        if p.capabilities.requires_cli:
+            click.echo(f"  requires: {', '.join(p.capabilities.requires_cli)}")
 
 
 @plugins_group.command("enable")
@@ -443,31 +479,24 @@ def config_group(ctx: click.Context) -> None:
 @click.pass_context
 def config_show(ctx: click.Context, resolved: bool) -> None:
     """Print current effective configuration."""
-    cfg = load_config()
-    profile = profile_for(ctx.obj.get("profile"))
     click.echo(f"Config file: {config_path()}")
     click.echo("")
     if resolved:
-        click.echo("Effective profile (merged):")
-        for k, v in profile.items():
-            click.echo(f"  {k}: {v}")
-        click.echo("")
+        effective = resolved_config(ctx.obj.get("profile"))
+        click.echo(json.dumps(effective, indent=2, default=str))
     else:
-        click.echo("Full config:")
-    click.echo(json.dumps(cfg, indent=2))
+        cfg = load_config()
+        click.echo(json.dumps(cfg.model_dump(), indent=2, default=str))
 
 
 @config_group.command("validate")
 def config_validate() -> None:
     """Validate the current configuration file."""
-    try:
-        cfg = load_config()
-        if not isinstance(cfg, dict):
-            click.echo("Error: config is not a valid dictionary.")
-            sys.exit(1)
-        click.echo("Config OK.")
-    except Exception as exc:
-        click.echo(f"Config validation error: {exc}")
+    ok, msg = validate_config_file()
+    if ok:
+        click.echo(msg)
+    else:
+        click.echo(msg)
         sys.exit(1)
 
 

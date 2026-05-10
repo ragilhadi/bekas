@@ -27,8 +27,10 @@ def _patch_data_dir(monkeypatch):
     monkeypatch.setattr(cfg, "_data_dir", lambda: ddir)
     monkeypatch.setattr(cfg, "_config_dir", lambda: cdir)
 
-    _permissive = {"interactive": False, "quarantine_enabled": False, "enabled_plugins": ["*"]}
-    _permissive_cfg = {"active_profile": "default", "profiles": {"default": _permissive}}
+    _permissive = cfg.Profile(interactive=False, quarantine_enabled=False, enabled_plugins=["*"])
+    _permissive_cfg = cfg.Config(active_profile="default", profiles={"default": _permissive})
+    config_file = cdir / "config.yaml"
+    config_file.write_text(cfg.DEFAULT_CONFIG)
     for mod in (cfg, cli_mod, runner_mod, clean_mod):
         if hasattr(mod, "load_config"):
             monkeypatch.setattr(mod, "load_config", lambda: _permissive_cfg)
@@ -36,7 +38,7 @@ def _patch_data_dir(monkeypatch):
             monkeypatch.setattr(mod, "is_plugin_enabled", lambda patterns, name: True)
         if hasattr(mod, "profile_for"):
             monkeypatch.setattr(mod, "profile_for", lambda n=None: _permissive)
-    monkeypatch.setattr(cli_mod, "ensure_config", lambda: cdir / "config.yaml")
+    monkeypatch.setattr(cli_mod, "ensure_config", lambda: config_file)
     monkeypatch.setattr(
         locking_mod, "acquire_lock", lambda lock_file=None: locking_mod.ProcessLock(lock_file or ddir / ".test.lock")
     )

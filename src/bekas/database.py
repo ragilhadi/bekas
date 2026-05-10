@@ -5,18 +5,19 @@ from __future__ import annotations
 import json
 import sqlite3
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
 from bekas.config import runs_db_path
-from bekas.models import Plan, RunResult
+from bekas.models import Candidate, Plan, RunResult
 
 
 def _init_db(db_path: Path | None = None) -> sqlite3.Connection:
     """Initialize the SQLite database with required tables.
 
-    Creates the ``runs`` and ``quarantine`` tables if they do not exist.
+    Creates the ``runs``, ``quarantine``, and ``audit_cache`` tables if they
+    do not exist.
 
     Args:
         db_path: Optional custom database path. Defaults to ``runs_db_path()``.
@@ -51,6 +52,23 @@ def _init_db(db_path: Path | None = None) -> sqlite3.Connection:
             size_bytes INTEGER NOT NULL DEFAULT 0,
             metadata_json TEXT
         )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS audit_cache (
+            plugin TEXT NOT NULL,
+            path TEXT NOT NULL,
+            fingerprint TEXT NOT NULL,
+            candidate_json TEXT NOT NULL,
+            cached_at INTEGER NOT NULL,
+            PRIMARY KEY (plugin, path)
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_audit_cache_cached_at ON audit_cache(cached_at)
         """
     )
     conn.commit()
@@ -229,3 +247,95 @@ def remove_quarantine_entry(qid: str, db_path: Path | None = None) -> None:
     conn.execute("DELETE FROM quarantine WHERE quarantine_id = ?", (qid,))
     conn.commit()
     conn.close()
+
+
+def get_audit_cache(
+    plugin: str,
+    path: str,
+    db_path: Path | None = None,
+    conn: sqlite3.Connection | None = None,
+) -> dict[str, Any] | None:
+    """Retrieve a cached audit entry if it exists.
+
+    Args:
+        plugin: Plugin name.
+        path: Candidate path.
+        db_path: Optional custom database path (ignored if ``conn`` provided).
+        conn: Optional existing SQLite connection to reuse.
+
+    Returns:
+        Cache dict with candidate_json and fingerprint, or None.
+    """
+    should_close = conn is None
+    if conn is None:
+        conn = _init_db(db_path)
+    row = conn.execute(
+        "SELECT fingerprint, candidate_json FROM audit_cache WHERE plugin = ? AND path = ?",
+        (plugin, path),
+    ).fetchone()
+    if should_close:
+        conn.close()
+    if not row:
+        return None
+    return dict(row)
+
+
+def set_audit_cache(
+    plugin: str,
+    path: str,
+    fingerprint: str,
+    candidate: Candidate,
+    db_path: Path | None = None,
+    conn: sqlite3.Connection | None = None,
+) -> None:
+    """Store or update an audit cache entry.
+
+    Args:
+        plugin: Plugin name.
+        path: Candidate path.
+        fingerprint: Computed fingerprint (e.g. size+mtime hash).
+        candidate: Candidate to serialize.
+        db_path: Optional custom database path (ignored if ``conn`` provided).
+        conn: Optional existing SQLite connection to reuse.
+    """
+    should_close = conn is None
+    if conn is None:
+        conn = _init_db(db_path)
+    conn.execute(
+        "INSERT OR REPLACE INTO audit_cache (plugin, path, fingerprint, candidate_json, cached_at) "
+        "VALUES (?, ?, ?, ?, ?)",
+        (plugin, path, fingerprint, candidate.model_dump_json(), int(datetime.now(UTC).timestamp())),
+    )
+    if should_close:
+        conn.commit()
+        conn.close()
+
+
+def clear_audit_cache(db_path: Path | None = None) -> None:
+    """Delete all audit cache entries.
+
+    Args:
+        db_path: Optional custom database path.
+    """
+    conn = _init_db(db_path)
+    conn.execute("DELETE FROM audit_cache")
+    conn.commit()
+    conn.close()
+
+
+def prune_audit_cache(max_age_hours: int = 24, db_path: Path | None = None) -> int:
+    """Remove audit cache entries older than the specified TTL.
+
+    Args:
+        max_age_hours: Maximum age in hours. Defaults to 24.
+        db_path: Optional custom database path.
+
+    Returns:
+        Number of rows deleted.
+    """
+    cutoff = int((datetime.now(UTC) - timedelta(hours=max_age_hours)).timestamp())
+    conn = _init_db(db_path)
+    cur = conn.execute("DELETE FROM audit_cache WHERE cached_at < ?", (cutoff,))
+    conn.commit()
+    conn.close()
+    return cur.rowcount

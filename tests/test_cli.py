@@ -8,6 +8,7 @@ import pytest
 from click.testing import CliRunner
 
 from bekas.cli import cli
+from bekas.plugin import Capabilities, Plugin
 
 
 @pytest.fixture(autouse=True)
@@ -32,8 +33,8 @@ def _patch_data_dir(monkeypatch):
     monkeypatch.setattr(cfg, "_config_dir", lambda: cdir)
 
     # Patch permissive profile at the source module level and in all consumers
-    _permissive = {"interactive": False, "quarantine_enabled": False, "enabled_plugins": ["*"]}
-    _permissive_cfg = {"active_profile": "default", "profiles": {"default": _permissive}}
+    _permissive = cfg.Profile(interactive=False, quarantine_enabled=False, enabled_plugins=["*"])
+    _permissive_cfg = cfg.Config(active_profile="default", profiles={"default": _permissive})
     for mod in (cfg, cli_mod, runner_mod, clean_mod):
         if hasattr(mod, "load_config"):
             monkeypatch.setattr(mod, "load_config", lambda: _permissive_cfg)
@@ -42,7 +43,6 @@ def _patch_data_dir(monkeypatch):
         if hasattr(mod, "profile_for"):
             monkeypatch.setattr(mod, "profile_for", lambda n=None: _permissive)
     monkeypatch.setattr(cli_mod, "ensure_config", lambda: cdir / "config.yaml")
-    # Disable single-instance lock for CLI tests
     monkeypatch.setattr(
         locking_mod, "acquire_lock", lambda lock_file=None: locking_mod.ProcessLock(lock_file or ddir / ".test.lock")
     )
@@ -53,9 +53,10 @@ def runner():
     return CliRunner()
 
 
-class _FakePlugin:
+class _FakePlugin(Plugin):
     name = "fake.test"
     description = "Fake plugin for testing."
+    capabilities = Capabilities(quarantine=False, estimated_runtime="fast")
 
     def is_available(self, ctx):
         return True
