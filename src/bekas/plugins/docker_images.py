@@ -91,8 +91,11 @@ class DockerImagesPlugin(Plugin):
                         reason=" ".join(reason_parts),
                         metadata={"image_id": img_id, "repo": repo, "tag": tag, "created": created},
                     )
-        except Exception:
-            pass
+        except Exception as exc:
+            if ctx.verbose:
+                import traceback
+                print(f"docker.images discover error: {exc}")
+                traceback.print_exc()
 
     def remove(self, candidate: Candidate, ctx: Context) -> RemovalResult:
         """Remove a Docker image.
@@ -264,7 +267,7 @@ def _parse_docker_size(size_str: str) -> int:
     """
     size_str = size_str.strip().replace(" ", "").upper()
     multipliers = {"B": 1, "KB": 1024, "MB": 1024**2, "GB": 1024**3, "TB": 1024**4}
-    for suffix, mult in multipliers.items():
+    for suffix, mult in sorted(multipliers.items(), key=lambda x: len(x[0]), reverse=True):
         if size_str.endswith(suffix):
             try:
                 num = float(size_str[: -len(suffix)])

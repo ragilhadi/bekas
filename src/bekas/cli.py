@@ -47,11 +47,8 @@ def _audit_to_plan(report: AuditReport, safe_only: bool = False, include_review:
         Plan containing the filtered candidates.
     """
     allowed = {Confidence.SAFE}
-    if not safe_only:
-        if include_review:
-            allowed.add(Confidence.REVIEW)
-        else:
-            allowed = {Confidence.SAFE, Confidence.REVIEW}
+    if include_review:
+        allowed.add(Confidence.REVIEW)
     candidates = [c for pr in report.plugins for c in pr.candidates if c.confidence in allowed]
     return Plan(audit_id=report.audit_id, candidates=candidates)
 

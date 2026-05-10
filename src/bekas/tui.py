@@ -86,7 +86,7 @@ class TuiApp(App):  # type: ignore[type-arg]
         for pr in report.plugins:
             if not pr.candidates:
                 continue
-            node = tree.root.add(f"{pr.name} ({pr.candidates_found})")
+            node = tree.root.add(f"{pr.name} ({len(pr.candidates)})")
             for c in pr.candidates:
                 node.add_leaf(f"{c.id} — {_human_size(c.size_bytes)}")
         tree.root.expand()
