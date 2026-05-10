@@ -94,7 +94,9 @@ def test_acquire_posix_oserror(tmp_path):
 def test_acquire_windows_oserror(tmp_path):
     """Windows msvcrt.locking OSError raises AlreadyRunningError."""
     lock_file = tmp_path / "test.lock"
-    fake_msvcrt = type("M", (), {"LK_NBLCK": 1, "locking": staticmethod(lambda *a, **k: (_ for _ in ()).throw(OSError("locked")))})()
+    fake_msvcrt = type(
+        "M", (), {"LK_NBLCK": 1, "locking": staticmethod(lambda *a, **k: (_ for _ in ()).throw(OSError("locked")))}
+    )()
     with (
         patch("bekas.locking.platform.system", return_value="Windows"),
         patch.dict("sys.modules", {"msvcrt": fake_msvcrt}),

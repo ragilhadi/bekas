@@ -44,7 +44,7 @@ def test_validate_plan_freshness_stat_error():
     )
     plan = Plan(audit_id="a1", candidates=[c], fingerprints={c.id: c.metadata["fingerprint"]})
     with patch.object(Path, "exists", return_value=True), patch.object(Path, "stat", side_effect=OSError("bad stat")):
-            valid, skipped = validate_plan_freshness(plan)
+        valid, skipped = validate_plan_freshness(plan)
     assert len(valid) == 0
     assert len(skipped) == 0
 
@@ -290,6 +290,7 @@ def test_generic_remove_delete_dir_exception(tmp_path):
     )
     ctx = Context(dry_run=False, config={}, verbose=False)
     import shutil
+
     with patch.object(shutil, "rmtree", side_effect=OSError("perm")):
         result = _generic_remove(c, ctx, quarantine_enabled=False, run_id="r1")
     assert result.success is False

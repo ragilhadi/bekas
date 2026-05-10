@@ -14,6 +14,7 @@ from bekas.safety import (
 
 # --- is_safe_to_delete layer tests ---
 
+
 def test_safe_normal_path(tmp_path):
     f = tmp_path / "safe.txt"
     f.write_text("hello")
@@ -72,12 +73,17 @@ def test_unsafe_user_exclusion(tmp_path):
 
 # --- filter_candidates ---
 
+
 def test_filter_candidates_drops_excluded():
     from bekas.models import Candidate, Confidence
 
     candidates = [
-        Candidate(id="a", category="x", size_bytes=1, path_or_handle="/etc/passwd", confidence=Confidence.SAFE, reason="r"),
-        Candidate(id="b", category="x", size_bytes=2, path_or_handle="/tmp/safe", confidence=Confidence.SAFE, reason="r"),
+        Candidate(
+            id="a", category="x", size_bytes=1, path_or_handle="/etc/passwd", confidence=Confidence.SAFE, reason="r"
+        ),
+        Candidate(
+            id="b", category="x", size_bytes=2, path_or_handle="/tmp/safe", confidence=Confidence.SAFE, reason="r"
+        ),
     ]
     safe = filter_candidates(candidates)
     assert len(safe) == 1
@@ -85,6 +91,7 @@ def test_filter_candidates_drops_excluded():
 
 
 # --- _is_too_recent ---
+
 
 def test_is_too_recent_zero_hours(tmp_path):
     f = tmp_path / "file.txt"
@@ -100,6 +107,7 @@ def test_is_too_recent_with_threshold(tmp_path):
 
 # --- _is_symlink_outside_home ---
 
+
 def test_symlink_inside_home(tmp_path, monkeypatch):
     home = tmp_path / "home"
     home.mkdir()
@@ -113,6 +121,7 @@ def test_symlink_inside_home(tmp_path, monkeypatch):
 
 # --- _is_non_local_filesystem ---
 
+
 def test_non_local_with_no_psutil(tmp_path):
     f = tmp_path / "file.txt"
     f.write_text("x")
@@ -120,6 +129,7 @@ def test_non_local_with_no_psutil(tmp_path):
 
 
 # --- _is_inside_active_venv ---
+
 
 def test_inside_active_venv(tmp_path, monkeypatch):
     venv = tmp_path / "env"
@@ -140,6 +150,7 @@ def test_inside_conda_prefix(tmp_path, monkeypatch):
 
 
 # --- is_excluded edge cases ---
+
 
 def test_is_excluded_nonexistent_path():
     assert is_excluded("/nonexistent/path/that/does/not/exist") is False  # only system paths excluded

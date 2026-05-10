@@ -26,8 +26,12 @@ def test_sort_by_tier():
 def test_sort_by_age():
     """Sort by age puts None-mtime last."""
     cands = [
-        Candidate(id="a", category="x", size_bytes=1, path_or_handle="/a", confidence=Confidence.SAFE, reason="r", mtime=100),
-        Candidate(id="b", category="x", size_bytes=1, path_or_handle="/b", confidence=Confidence.SAFE, reason="r", mtime=200),
+        Candidate(
+            id="a", category="x", size_bytes=1, path_or_handle="/a", confidence=Confidence.SAFE, reason="r", mtime=100
+        ),
+        Candidate(
+            id="b", category="x", size_bytes=1, path_or_handle="/b", confidence=Confidence.SAFE, reason="r", mtime=200
+        ),
         Candidate(id="c", category="x", size_bytes=1, path_or_handle="/c", confidence=Confidence.SAFE, reason="r"),
     ]
     result = _sort_and_limit(cands, sort_by="age")
@@ -66,6 +70,7 @@ def test_format_human_empty_plan():
 def test_format_human_runresult():
     """format_human on a RunResult."""
     from bekas.models import RemovalResult
+
     c = Candidate(id="x", category="foo", size_bytes=1024, path_or_handle="/x", confidence=Confidence.SAFE, reason="r")
     rr = RunResult(
         run_id="run_01",
@@ -82,9 +87,16 @@ def test_format_human_runresult():
 def test_format_md_basic():
     """format_md produces expected markdown."""
     from datetime import UTC, datetime
-    pr = PluginReport(name="foo", candidates_found=1, candidates=[
-        Candidate(id="x", category="foo", size_bytes=1024, path_or_handle="/x", confidence=Confidence.SAFE, reason="r"),
-    ])
+
+    pr = PluginReport(
+        name="foo",
+        candidates_found=1,
+        candidates=[
+            Candidate(
+                id="x", category="foo", size_bytes=1024, path_or_handle="/x", confidence=Confidence.SAFE, reason="r"
+            ),
+        ],
+    )
     report = AuditReport(
         audit_id="a1",
         started_at=datetime.now(UTC),
@@ -101,9 +113,14 @@ def test_format_md_basic():
 
 def test_format_json_plan():
     """format_json on a Plan."""
-    plan = Plan(audit_id="a1", candidates=[
-        Candidate(id="x", category="foo", size_bytes=1024, path_or_handle="/x", confidence=Confidence.SAFE, reason="r"),
-    ])
+    plan = Plan(
+        audit_id="a1",
+        candidates=[
+            Candidate(
+                id="x", category="foo", size_bytes=1024, path_or_handle="/x", confidence=Confidence.SAFE, reason="r"
+            ),
+        ],
+    )
     data = format_json(plan)
     assert "x" in data
 
@@ -116,8 +133,16 @@ def test_human_size_pb():
 def test_format_candidates():
     """format_candidates renders individual candidates."""
     from bekas.formatters import format_candidates
+
     cands = [
-        Candidate(id="x", category="foo", size_bytes=1024, path_or_handle="/x", confidence=Confidence.SAFE, reason="test reason"),
+        Candidate(
+            id="x",
+            category="foo",
+            size_bytes=1024,
+            path_or_handle="/x",
+            confidence=Confidence.SAFE,
+            reason="test reason",
+        ),
     ]
     text = format_candidates(cands)
     assert "x" in text

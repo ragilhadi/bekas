@@ -24,6 +24,7 @@ def test_discover_and_remove(tmp_path, monkeypatch):
     # Set mtime to 120 days ago
     old_mtime = time.time() - (120 * 24 * 3600)
     import os
+
     os.utime(old_ss, (old_mtime, old_mtime))
 
     new_ss = pics / "Screenshot_recent.png"
@@ -51,6 +52,7 @@ def test_quarantine_fallback(tmp_path, monkeypatch):
     ss.write_text("data")
     old_mtime = time.time() - (120 * 24 * 3600)
     import os
+
     os.utime(ss, (old_mtime, old_mtime))
 
     p = ScreenshotsPlugin()

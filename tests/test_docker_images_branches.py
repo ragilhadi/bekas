@@ -173,18 +173,21 @@ def test_remove_empty_image_id():
     assert result.success is False
 
 
-@pytest.mark.parametrize("size_str,expected", [
-    ("1B", 1),
-    ("1KB", 1024),
-    ("1MB", 1024 ** 2),
-    ("1GB", 1024 ** 3),
-    ("1TB", 1024 ** 4),
-    ("1.5GB", int(1.5 * 1024 ** 3)),
-    ("2.5MB", int(2.5 * 1024 ** 2)),
-    ("  1 GB  ", 1024 ** 3),
-    ("123", 123),
-    ("0", 0),
-    ("invalid", 0),
-])
+@pytest.mark.parametrize(
+    "size_str,expected",
+    [
+        ("1B", 1),
+        ("1KB", 1024),
+        ("1MB", 1024**2),
+        ("1GB", 1024**3),
+        ("1TB", 1024**4),
+        ("1.5GB", int(1.5 * 1024**3)),
+        ("2.5MB", int(2.5 * 1024**2)),
+        ("  1 GB  ", 1024**3),
+        ("123", 123),
+        ("0", 0),
+        ("invalid", 0),
+    ],
+)
 def test_parse_docker_size(size_str, expected):
     assert _parse_docker_size(size_str) == expected

@@ -13,6 +13,7 @@ def test_discover_and_remove(tmp_path, monkeypatch):
     monkeypatch.setattr(Path, "home", lambda: home)
     # Point tempfile to tmp_path so /tmp fallback isn't needed
     import tempfile as tf_mod
+
     monkeypatch.setattr(tf_mod, "gettempdir", lambda: str(tmp_path))
 
     # Create an old temp file by current user

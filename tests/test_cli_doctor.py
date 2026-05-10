@@ -1,6 +1,5 @@
 """Tests for CLI doctor command."""
 
-
 from bekas.cli import cli
 
 

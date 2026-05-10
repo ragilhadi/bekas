@@ -94,6 +94,7 @@ class DockerImagesPlugin(Plugin):
         except Exception as exc:
             if ctx.verbose:
                 import traceback
+
                 print(f"docker.images discover error: {exc}")
                 traceback.print_exc()
 

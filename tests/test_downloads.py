@@ -17,6 +17,7 @@ def test_discover_and_remove(tmp_path, monkeypatch):
     old_dl.write_text("data")
     old_atime = time.time() - (200 * 24 * 3600)
     import os
+
     os.utime(old_dl, (old_atime, old_atime))
 
     new_dl = downloads / "new_file.zip"

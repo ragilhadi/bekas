@@ -1,6 +1,5 @@
 """Tests for CLI config subcommands."""
 
-
 from bekas.cli import cli
 
 

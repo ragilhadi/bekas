@@ -196,7 +196,9 @@ def test_check_cross_fs_exception():
 
 def test_run_checks_skips():
     """run_checks respects skip list."""
-    results = run_checks(skip=["python_version", "config", "quarantine", "undo_db", "docker", "git", "plugins", "disk_space", "cross_fs"])
+    results = run_checks(
+        skip=["python_version", "config", "quarantine", "undo_db", "docker", "git", "plugins", "disk_space", "cross_fs"]
+    )
     assert len(results) == 0
 
 

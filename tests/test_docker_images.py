@@ -99,7 +99,10 @@ def test_discover_yields_tagged_image():
     """Discover should yield a non-dangling, unused image as REVIEW."""
     p = DockerImagesPlugin()
 
-    list_proc = MagicMock(returncode=0, stdout='{"ID":"abc","Repository":"foo","Tag":"latest","Size":"100MB","CreatedAt":"2024-01-01 00:00:00"}\n')
+    list_proc = MagicMock(
+        returncode=0,
+        stdout='{"ID":"abc","Repository":"foo","Tag":"latest","Size":"100MB","CreatedAt":"2024-01-01 00:00:00"}\n',
+    )
     dangling_proc = MagicMock(returncode=0, stdout="")
     ps_proc = MagicMock(returncode=1, stdout="")
 

@@ -27,12 +27,14 @@ def test_discover_json_output():
     ctx.config = {"plugin_settings": {"docker.buildx.cache": {"min_idle_days": 30}}}
 
     now = "2026-01-01T00:00:00+00:00"
-    json_line = json.dumps({
-        "ID": "abc123",
-        "Size": "5.00GB",
-        "LastUsedAt": "2025-01-01T00:00:00+00:00",
-        "Mutable": "false",
-    })
+    json_line = json.dumps(
+        {
+            "ID": "abc123",
+            "Size": "5.00GB",
+            "LastUsedAt": "2025-01-01T00:00:00+00:00",
+            "Mutable": "false",
+        }
+    )
     proc = MagicMock()
     proc.returncode = 0
     proc.stdout = json_line

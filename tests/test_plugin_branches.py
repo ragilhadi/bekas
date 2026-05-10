@@ -29,6 +29,7 @@ def _mock_entry(path: Path, is_dir: bool = False, stat_side_effect=None, name: s
 
 # ─── Downloads ──────────────────────────────────────────────
 
+
 class TestDownloadsBranches:
     def test_discover_no_downloads_dir(self):
         """If ~/Downloads doesn't exist, yield nothing."""
@@ -46,6 +47,7 @@ class TestDownloadsBranches:
         f.write_text("x")
         old = datetime.now() - timedelta(days=200)
         import os
+
         os.utime(f, (old.timestamp(), old.timestamp()))
         mock_ent = _mock_entry(f, is_dir=False, stat_side_effect=OSError("boom"))
         with (
@@ -63,6 +65,7 @@ class TestDownloadsBranches:
         (downloads / "subdir").mkdir()
         old = datetime.now() - timedelta(days=200)
         import os
+
         os.utime(downloads / "subdir", (old.timestamp(), old.timestamp()))
         with patch.object(Path, "home", return_value=tmp_path):
             cands = list(plugin.discover(_make_ctx()))
@@ -122,6 +125,7 @@ class TestDownloadsBranches:
 
 # ─── Screenshots ────────────────────────────────────────────
 
+
 class TestScreenshotsBranches:
     def test_discover_folder_doesnt_exist(self):
         """Screenshot folder missing → nothing yielded."""
@@ -154,6 +158,7 @@ class TestScreenshotsBranches:
         (pics / "Screenshot_2023.png").write_text("x")
         # Set mtime to old
         import os
+
         os.utime(pics / "Screenshot_2023.png", (old.timestamp(), old.timestamp()))
         os.utime(pics / "notes.txt", (old.timestamp(), old.timestamp()))
         with patch.object(Path, "home", return_value=home):
@@ -172,6 +177,7 @@ class TestScreenshotsBranches:
         f.write_text("x")
         old = datetime.now() - timedelta(days=100)
         import os
+
         os.utime(f, (old.timestamp(), old.timestamp()))
         mock_ent = _mock_entry(f, is_dir=False, stat_side_effect=OSError("boom"), name="ss.png")
         with (
@@ -232,6 +238,7 @@ class TestScreenshotsBranches:
 
 
 # ─── Dotfiles Backups ───────────────────────────────────────
+
 
 class TestDotfilesBackupsBranches:
     def test_discover_directory_skipped(self, tmp_path):
@@ -306,6 +313,7 @@ class TestDotfilesBackupsBranches:
 
 
 # ─── Rust Target ────────────────────────────────────────────
+
 
 class TestRustTargetBranches:
     def test_discover_no_roots(self, tmp_path):

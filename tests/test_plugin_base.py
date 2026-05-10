@@ -91,6 +91,7 @@ def test_is_available_platform_mismatch(monkeypatch):
     ctx = Context(dry_run=True, config={})
     # On Linux, this should be False
     import platform
+
     if platform.system().lower() != "darwin":
         assert p.is_available(ctx) is False
     else:

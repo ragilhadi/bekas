@@ -50,7 +50,9 @@ def test_discover_orphan_and_active(tmp_path, monkeypatch):
     assert any("orphan" in i for i in ids)
     assert any("active" in i for i in ids)
 
-    orphan_c = next(c for c in candidates if c.path_or_handle.endswith("orphan/.venv") or "/orphan/.venv" in c.path_or_handle)
+    orphan_c = next(
+        c for c in candidates if c.path_or_handle.endswith("orphan/.venv") or "/orphan/.venv" in c.path_or_handle
+    )
     assert orphan_c.confidence == Confidence.SAFE, f"Orphan confidence was {orphan_c.confidence}: {orphan_c.reason}"
 
     active_c = next(c for c in candidates if c.path_or_handle.endswith("active/.venv"))

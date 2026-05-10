@@ -88,6 +88,7 @@ def test_tui_on_tree_node_selected_leaf():
 
     with patch.object(app, "query_one", side_effect=mock_query_one):
         from textual.widgets import Tree
+
         event = Tree.NodeSelected(mock_node)
         app.on_tree_node_selected(event)
         mock_table.clear.assert_called()
@@ -135,6 +136,7 @@ def test_tui_on_tree_node_selected_branch():
 
     with patch.object(app, "query_one", side_effect=mock_query_one):
         from textual.widgets import Tree
+
         event = Tree.NodeSelected(mock_node)
         app.on_tree_node_selected(event)
         mock_table.clear.assert_called()

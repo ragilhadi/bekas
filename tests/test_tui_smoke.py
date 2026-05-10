@@ -1,6 +1,5 @@
 """TUI smoke tests."""
 
-
 from bekas.models import AuditReport, AuditSummary, Candidate, Confidence, PluginReport, SystemInfo
 from bekas.tui import TuiApp
 
