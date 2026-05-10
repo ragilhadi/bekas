@@ -9,7 +9,7 @@ from collections.abc import Iterator
 from typing import Any
 
 from bekas.models import Candidate, Confidence, Context, RemovalResult
-from bekas.plugin import Plugin
+from bekas.plugin import Capabilities, Plugin
 
 
 class DockerImagesPlugin(Plugin):
@@ -27,6 +27,7 @@ class DockerImagesPlugin(Plugin):
     name = "docker.images"
     description = "Finds dangling and unused Docker images."
     requires_commands = ["docker"]
+    capabilities = Capabilities(requires_cli=("docker",), quarantine=False, estimated_runtime="medium")
 
     def is_available(self, ctx: Context) -> bool:
         """Check if the ``docker`` command is present on PATH.
@@ -126,14 +127,6 @@ class DockerImagesPlugin(Plugin):
 
         Returns:
             Whether undo is supported.
-        """
-        return False
-
-    def supports_quarantine(self) -> bool:
-        """Return False because Docker images cannot be quarantined.
-
-        Returns:
-            Whether quarantine is supported.
         """
         return False
 

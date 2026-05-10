@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from bekas.models import Candidate, Confidence, Context, RemovalResult
-from bekas.plugin import Plugin
+from bekas.plugin import Capabilities, Plugin
 
 
 class RustTargetPlugin(Plugin):
@@ -26,6 +26,7 @@ class RustTargetPlugin(Plugin):
     name = "rust.target"
     description = "Finds Rust target/ directories that can be rebuilt."
     requires_commands = []
+    capabilities = Capabilities(quarantine=True, estimated_runtime="medium")
 
     def discover(self, ctx: Context) -> Iterator[Candidate]:
         """Yield Rust target directory candidates.
@@ -82,14 +83,6 @@ class RustTargetPlugin(Plugin):
         except Exception as exc:
             return RemovalResult(success=False, bytes_freed=0, log=str(exc))
 
-    def supports_quarantine(self) -> bool:
-        """Return True because target directories can be quarantined.
-
-        Returns:
-            Whether quarantine is supported.
-        """
-        return True
-
     def quarantine(
         self,
         candidate: Candidate,
@@ -118,30 +111,38 @@ class RustTargetPlugin(Plugin):
         except Exception as exc:
             return RemovalResult(success=False, bytes_freed=0, log=str(exc))
 
+    def supports_undo(self) -> bool:
+        """Return True because quarantined targets can be restored.
+
+        Returns:
+            Whether undo is supported.
+        """
+        return True
+
 
 def _find_targets(root: Path, seen: set[Path]) -> Iterator[Path]:
-    """Walk a directory tree and yield valid Rust target paths.
+    """Walk a directory tree and yield Rust target/ directory paths.
 
     Args:
         root: Directory to walk.
         seen: Set of already-yielded paths to avoid duplicates.
 
     Yields:
-        Resolved paths to Rust target directories.
+        Resolved paths to target directories.
     """
     for dirpath, dirnames, _ in os.walk(root):
         dp = Path(dirpath)
         for d in list(dirnames):
             if d == "target":
-                target = dp / d
-                # Validate it looks like a Rust target (contains .rustc_info.json or is next to Cargo.toml)
-                cargo_toml = dp / "Cargo.toml"
-                rustc_info = target / ".rustc_info.json"
-                if cargo_toml.exists() or rustc_info.exists():
+                tp = dp / d
+                # Validate it's a Rust target (neighbour has Cargo.toml or target has .rustc_info.json)
+                has_cargo = (dp / "Cargo.toml").exists()
+                has_rustc_info = (tp / ".rustc_info.json").exists()
+                if has_cargo or has_rustc_info:
                     try:
-                        real = target.resolve()
+                        real = tp.resolve()
                     except OSError:
-                        real = target
+                        real = tp
                     if real not in seen:
                         seen.add(real)
                         yield real
@@ -149,7 +150,7 @@ def _find_targets(root: Path, seen: set[Path]) -> Iterator[Path]:
 
 
 def _du(path: Path) -> int:
-    """Compute the total byte size of a path recursively.
+    """Compute total byte size of a path recursively.
 
     Args:
         path: File or directory to measure.

@@ -9,7 +9,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from bekas.models import Candidate, Confidence, Context, RemovalResult
-from bekas.plugin import Plugin
+from bekas.plugin import Capabilities, Plugin
 
 
 class PythonVenvsPlugin(Plugin):
@@ -27,6 +27,7 @@ class PythonVenvsPlugin(Plugin):
     name = "python.venvs"
     description = "Finds Python virtual environments in abandoned projects."
     requires_commands = []
+    capabilities = Capabilities(quarantine=True, estimated_runtime="medium")
 
     def discover(self, ctx: Context) -> Iterator[Candidate]:
         """Yield Python venv candidates.
@@ -105,14 +106,6 @@ class PythonVenvsPlugin(Plugin):
             return RemovalResult(success=True, bytes_freed=size, log="Deleted")
         except Exception as exc:
             return RemovalResult(success=False, bytes_freed=0, log=str(exc))
-
-    def supports_quarantine(self) -> bool:
-        """Return True because venvs can be quarantined.
-
-        Returns:
-            Whether quarantine is supported.
-        """
-        return True
 
     def quarantine(
         self,

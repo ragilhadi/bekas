@@ -14,7 +14,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from bekas.models import Candidate, Confidence, Context, RemovalResult
-from bekas.plugin import Plugin
+from bekas.plugin import Capabilities, Plugin
 
 
 class XcodeDerivedDataPlugin(Plugin):
@@ -33,6 +33,7 @@ class XcodeDerivedDataPlugin(Plugin):
     description = "Finds stale Xcode DerivedData project directories."
     requires_commands = []
     supported_platforms = ["darwin"]
+    capabilities = Capabilities(platforms=("darwin",), quarantine=False, estimated_runtime="medium")
 
     def discover(self, ctx: Context) -> Iterator[Candidate]:
         """Yield stale DerivedData project directory candidates.
@@ -98,14 +99,6 @@ class XcodeDerivedDataPlugin(Plugin):
             return RemovalResult(success=True, bytes_freed=size, log="Deleted")
         except Exception as exc:
             return RemovalResult(success=False, bytes_freed=0, log=str(exc))
-
-    def supports_quarantine(self) -> bool:
-        """Return False — DerivedData is reproducible so quarantine is not needed.
-
-        Returns:
-            False.
-        """
-        return False
 
     def supports_undo(self) -> bool:
         """Return False because undo is not supported.

@@ -180,11 +180,13 @@ class PluginReport(BaseModel):
         name: Plugin name.
         candidates_found: Number of candidates discovered (pre-filter).
         candidates: Candidates after safety filtering.
+        error: Optional error message if the plugin crashed or timed out.
     """
 
     name: str
     candidates_found: int
     candidates: list[Candidate] = Field(default_factory=list)
+    error: str | None = None
 
 
 class AuditSummary(BaseModel):

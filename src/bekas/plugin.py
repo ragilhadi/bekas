@@ -6,8 +6,36 @@ import importlib.metadata as metadata
 import platform
 from abc import ABC, abstractmethod
 from collections.abc import Iterator
+from dataclasses import dataclass
 
 from bekas.models import Candidate, Context, RemovalResult
+
+
+@dataclass(frozen=True)
+class Capabilities:
+    """Manifest of plugin capabilities for scheduling and compatibility checks.
+
+    Attributes:
+        quarantine: Whether the plugin supports quarantine operations.
+        parallel_safe: Whether the plugin can safely run in parallel with others.
+        requires_network: Whether the plugin needs network access.
+        requires_root: Whether the plugin needs root/admin privileges.
+        requires_cli: Tuple of external CLI commands required.
+        platforms: Supported platform identifiers.
+        estimated_runtime: Expected runtime tier (fast / medium / slow).
+    """
+
+    quarantine: bool = False
+    parallel_safe: bool = True
+    requires_network: bool = False
+    requires_root: bool = False
+    requires_cli: tuple[str, ...] = ()
+    platforms: tuple[str, ...] = ("linux", "darwin", "windows")
+    estimated_runtime: str = "fast"
+
+    def __post_init__(self) -> None:
+        if self.estimated_runtime not in ("fast", "medium", "slow"):
+            raise ValueError("estimated_runtime must be 'fast', 'medium', or 'slow'")
 
 
 class Plugin(ABC):
@@ -23,12 +51,14 @@ class Plugin(ABC):
         requires_commands: List of external commands required for this plugin.
         supported_platforms: Optional list of platform names
             (e.g., ``["darwin", "linux", "windows"]``).
+        capabilities: Capability manifest for the runner.
     """
 
     name: str = ""
     description: str = ""
     requires_commands: list[str] = []
     supported_platforms: list[str] | None = None
+    capabilities: Capabilities = Capabilities()
 
     def is_available(self, ctx: Context) -> bool:
         """Check if this plugin can run on the current system.
@@ -43,7 +73,13 @@ class Plugin(ABC):
         """
         if self.supported_platforms and platform.system().lower() not in self.supported_platforms:
             return False
+        # Also validate capabilities.platforms if present
+        if self.capabilities.platforms and platform.system().lower() not in self.capabilities.platforms:
+            return False
         for cmd in self.requires_commands:
+            if ctx.which(cmd) is None:
+                return False
+        for cmd in self.capabilities.requires_cli:
             if ctx.which(cmd) is None:
                 return False
         return True
@@ -82,7 +118,7 @@ class Plugin(ABC):
         Returns:
             Whether quarantine is supported.
         """
-        return False
+        return self.capabilities.quarantine
 
     def supports_undo(self) -> bool:
         """Return True if the plugin supports undo operations.

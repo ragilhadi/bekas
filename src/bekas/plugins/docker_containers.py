@@ -7,7 +7,7 @@ import shutil
 from collections.abc import Iterator
 
 from bekas.models import Candidate, Confidence, Context, RemovalResult
-from bekas.plugin import Plugin
+from bekas.plugin import Capabilities, Plugin
 
 
 class DockerContainersPlugin(Plugin):
@@ -24,6 +24,7 @@ class DockerContainersPlugin(Plugin):
     name = "docker.containers"
     description = "Finds stopped Docker containers older than a threshold."
     requires_commands = ["docker"]
+    capabilities = Capabilities(requires_cli=("docker",), quarantine=False, estimated_runtime="fast")
 
     def is_available(self, ctx: Context) -> bool:
         """Check if the ``docker`` command is present on PATH.
@@ -98,13 +99,5 @@ class DockerContainersPlugin(Plugin):
 
         Returns:
             Whether undo is supported.
-        """
-        return False
-
-    def supports_quarantine(self) -> bool:
-        """Return False because containers cannot be quarantined.
-
-        Returns:
-            Whether quarantine is supported.
         """
         return False

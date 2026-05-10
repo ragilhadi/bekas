@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from bekas.models import Candidate, Confidence, Context, RemovalResult
-from bekas.plugin import Plugin
+from bekas.plugin import Capabilities, Plugin
 
 
 class PythonCachePlugin(Plugin):
@@ -27,6 +27,7 @@ class PythonCachePlugin(Plugin):
     name = "python.cache"
     description = "Finds __pycache__, .pytest_cache, .mypy_cache, .ruff_cache in old projects."
     requires_commands = []
+    capabilities = Capabilities(quarantine=False, estimated_runtime="medium")
 
     CACHE_NAMES = {"__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache"}
 

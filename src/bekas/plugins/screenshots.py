@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from bekas.models import Candidate, Confidence, Context, RemovalResult
-from bekas.plugin import Plugin
+from bekas.plugin import Capabilities, Plugin
 
 
 class ScreenshotsPlugin(Plugin):
@@ -26,6 +26,7 @@ class ScreenshotsPlugin(Plugin):
     name = "screenshots"
     description = "Finds old screenshot files on macOS, Linux, and Windows."
     requires_commands = []
+    capabilities = Capabilities(quarantine=True, estimated_runtime="fast")
 
     def discover(self, ctx: Context) -> Iterator[Candidate]:
         """Yield old screenshot candidates.
@@ -98,14 +99,6 @@ class ScreenshotsPlugin(Plugin):
             return RemovalResult(success=True, bytes_freed=size, log="Deleted")
         except Exception as exc:
             return RemovalResult(success=False, bytes_freed=0, log=str(exc))
-
-    def supports_quarantine(self) -> bool:
-        """Return True because screenshots can be quarantined.
-
-        Returns:
-            Whether quarantine is supported.
-        """
-        return True
 
     def quarantine(
         self,
