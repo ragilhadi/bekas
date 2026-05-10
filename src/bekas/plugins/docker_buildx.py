@@ -144,11 +144,13 @@ def _parse_buildx_du(ctx: Context) -> list[dict[str, Any]]:
                 entry = json.loads(line)
                 size_bytes = _parse_docker_size(entry.get("Size", "0B"))
                 last_used = _parse_docker_time(entry.get("LastUsedAt", ""))
-                entries.append({
-                    "id": entry.get("ID", "unknown"),
-                    "size_bytes": size_bytes,
-                    "last_used_at": last_used,
-                })
+                entries.append(
+                    {
+                        "id": entry.get("ID", "unknown"),
+                        "size_bytes": size_bytes,
+                        "last_used_at": last_used,
+                    }
+                )
             except (json.JSONDecodeError, ValueError):
                 continue
         return entries
@@ -168,11 +170,13 @@ def _parse_buildx_du(ctx: Context) -> list[dict[str, Any]]:
         if match:
             size_bytes = _parse_docker_size(match.group("size").strip())
             last_used = _parse_human_time(match.group("age").strip())
-            entries.append({
-                "id": match.group("type").strip(),
-                "size_bytes": size_bytes,
-                "last_used_at": last_used,
-            })
+            entries.append(
+                {
+                    "id": match.group("type").strip(),
+                    "size_bytes": size_bytes,
+                    "last_used_at": last_used,
+                }
+            )
     return entries
 
 

@@ -1,5 +1,11 @@
 # bekas
 
+[![CI](https://github.com/ragilhadi/bekas/actions/workflows/test.yml/badge.svg)](https://github.com/ragilhadi/bekas/actions/workflows/test.yml)
+[![Coverage](https://img.shields.io/badge/coverage-80%25-green)](https://github.com/ragilhadi/bekas)
+[![PyPI](https://img.shields.io/pypi/v/bekas)](https://pypi.org/project/bekas/)
+[![Python](https://img.shields.io/pypi/pyversions/bekas)](https://pypi.org/project/bekas/)
+[![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+
 One audit. Every kind of forgotten thing. Nothing deleted you cared about.
 
 `bekas` is a CLI utility that audits your local machine for stuff you forgot — orphaned Docker images, unused git branches, old `node_modules`, dangling Python venvs, stale downloads, screenshots from years ago — and helps you safely reclaim disk space. Every destructive action is logged to an SQLite undo log and can be quarantined before permanent deletion.
@@ -19,10 +25,12 @@ One audit. Every kind of forgotten thing. Nothing deleted you cared about.
   - [`quarantine`](#bekas-quarantine)
   - [`plugins`](#bekas-plugins)
   - [`config`](#bekas-config)
+  - [`doctor`](#bekas-doctor)
   - [`tui`](#bekas-tui)
 - [Plugins](#plugins)
 - [Configuration](#configuration)
 - [Safety Model](#safety-model)
+- [Comparison](#comparison)
 - [Architecture & File Structure](#architecture--file-structure)
 - [License](#license)
 
@@ -30,7 +38,16 @@ One audit. Every kind of forgotten thing. Nothing deleted you cared about.
 
 ## Installation
 
+**Recommended — use `pipx` or `uv` so bekas stays isolated from your project dependencies:**
+
 ```bash
+# pipx (most systems)
+pipx install bekas
+
+# uv (fastest)
+uv tool install bekas
+
+# Or plain pip if you prefer
 pip install bekas
 ```
 
@@ -64,6 +81,8 @@ bekas audit                    # Human-readable output
 bekas audit --json             # JSON output
 bekas audit --plugin docker    # Only run Docker plugins
 bekas audit --serial           # Run plugins one at a time
+bekas audit --sort-by size     # Sort by reclaimable size
+bekas audit --top 20           # Only show top 20 candidates
 ```
 
 ### `bekas plan`
@@ -124,7 +143,7 @@ Files removed by plugins that support quarantine are moved to a quarantine direc
 
 ```bash
 bekas quarantine list                     # Show quarantined items
-bekas quarantine restore <quarantine_id>    # Restore to original path
+bekas quarantine restore <quarantine_id>  # Restore to original path
 bekas quarantine purge                    # Empty quarantine immediately
 ```
 
@@ -144,6 +163,18 @@ Print the current effective configuration.
 
 ```bash
 bekas config
+bekas config show --resolved   # Effective config after profile merge
+bekas config validate            # Validate config file syntax
+```
+
+### `bekas doctor`
+
+Diagnose the bekas runtime environment.
+
+```bash
+bekas doctor                   # Human-readable health check
+bekas doctor --json            # Machine-readable output
+bekas doctor --skip docker     # Skip specific checks
 ```
 
 ### `bekas tui`
@@ -162,15 +193,19 @@ bekas tui
 |---|---|---|---|
 | `docker.images` | `docker.image.*` | Dangling & unused Docker images | docker |
 | `docker.containers` | `docker.container.*` | Stopped containers | docker |
+| `docker.buildx.cache` | `docker.buildx.cache` | Stale BuildKit cache entries | docker |
 | `python.venvs` | `python.venv` | Orphaned Python virtual environments | — |
 | `python.cache` | `python.cache` | `__pycache__`, `.pytest_cache`, `.mypy_cache`, `.ruff_cache` | — |
+| `pip.cache` | `pip.cache` | Stale pip download & wheel cache | — |
 | `node.modules` | `node.modules` | Old `node_modules` directories | — |
 | `rust.target` | `rust.target` | Old `target/` build directories | — |
 | `git.branches` | `git.branch` | Fully-merged local branches | git |
 | `downloads` | `downloads.file` | Old files in `~/Downloads` | — |
 | `screenshots` | `screenshots.file` | Old screenshots (Desktop / Pictures) | — |
 | `system.tmp` | `system.tmp` | Old temp files owned by you | — |
+| `system.trash` | `system.trash` | macOS/Linux Trash contents | — |
 | `dotfiles.backups` | `dotfiles.backups` | Backup files like `.zshrc.bak` | — |
+| `xcode.derived_data` | `xcode.derived_data` | Stale Xcode build caches (macOS only) | — |
 
 Plugins are auto-discovered via `entry_points` in `pyproject.toml`. You can write your own by subclassing `bekas.plugin.Plugin`.
 
@@ -183,7 +218,7 @@ The first time you run `bekas`, a config file is created at the platform-specifi
 Example:
 
 ```yaml
-version: "0.1.0"
+version: "0.2.0"
 active_profile: default
 profiles:
   default:
@@ -223,10 +258,12 @@ profiles:
   - `SAFE` — Low risk (e.g. dangling Docker image, no project nearby).
   - `REVIEW` — Medium risk (e.g. old download, active project but untouched).
   - `MANUAL` — High risk (e.g. branch on an active project, container in use).
-- **Hard exclusions** — System paths and sensitive files are automatically excluded.
+- **Hard exclusions** — System paths and sensitive files are automatically excluded. See [`docs/SAFETY.md`](docs/SAFETY.md) for the full exclusion list.
 - **Quarantine** — Deletable files are moved to a quarantine folder so you can `restore` them later.
 - **Undo log** — Every `clean --apply` is recorded in SQLite with per-candidate results and undo tokens.
 - **Signed plans** — Saved plan files include a signature to detect tampering.
+- **Typed confirmation gate** — `clean --apply` requires typing `"yes"` (or a random token for high-risk plans) before any destructive action.
+
 
 ---
 
@@ -247,20 +284,26 @@ bekas/
 │   ├── database.py              # SQLite undo log & quarantine registry
 │   ├── quarantine.py            # Move / restore / purge quarantined items
 │   ├── signing.py               # Plan file signing & verification
+│   ├── doctor.py                # Runtime environment diagnostics
+│   ├── locking.py               # Single-instance process lock
 │   ├── tui.py                   # Textual interactive UI
 │   └── plugins/
 │       ├── docker_images.py     # Dangling & unused Docker images
 │       ├── docker_containers.py # Stopped containers
+│       ├── docker_buildx.py     # BuildKit cache
 │       ├── python_venvs.py      # Orphaned Python virtual environments
 │       ├── python_cache.py      # __pycache__ & tool caches
+│       ├── pip_cache.py         # pip download & wheel cache
 │       ├── node_modules.py      # Old node_modules directories
 │       ├── rust_target.py       # Rust target/ directories
 │       ├── git_branches.py      # Stale merged local branches
 │       ├── downloads.py         # Old files in ~/Downloads
 │       ├── screenshots.py       # Old screenshots
 │       ├── system_tmp.py        # Old temp files
-│       └── dotfiles_backups.py  # Dotfile backup files
-├── tests/                       # pytest test suite
+│       ├── system_trash.py      # macOS/Linux Trash
+│       ├── dotfiles_backups.py  # Dotfile backup files
+│       └── xcode_derived_data.py # Xcode DerivedData (macOS)
+├── tests/                       # pytest test suite (80%+ coverage)
 ├── pyproject.toml               # Project metadata, deps, entry points
 └── README.md                    # This file
 ```

@@ -30,9 +30,11 @@ def test_discover_and_remove(tmp_path, monkeypatch):
     old_project.mkdir()
     plist = old_project / "info.plist"
     import time
+
     old_mtime = time.time() - (70 * 24 * 3600)
     plist.write_text("dummy")
     import os
+
     os.utime(plist, (old_mtime, old_mtime))
 
     # Create a recent entry
