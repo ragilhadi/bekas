@@ -81,6 +81,8 @@ bekas audit                    # Human-readable output
 bekas audit --json             # JSON output
 bekas audit --plugin docker    # Only run Docker plugins
 bekas audit --serial           # Run plugins one at a time
+bekas audit --no-cache         # Skip the audit cache (full rescan)
+bekas audit --rebuild-cache    # Clear and rebuild the audit cache
 bekas audit --sort-by size     # Sort by reclaimable size
 bekas audit --top 20           # Only show top 20 candidates
 ```
@@ -128,11 +130,13 @@ bekas inspect ss:Screenshot_2023-01-01.png
 
 ### `bekas history` / `bekas undo`
 
-Every `clean --apply` is persisted to an SQLite undo log.
+Every `clean --apply` is persisted to an SQLite undo log and a structured JSONL event log.
 
 ```bash
 bekas history                  # List past runs
 bekas history <run_id>         # Show details for one run
+bekas history --since 30d      # Show events from the last 30 days
+bekas history --since 30d --json  # Dump raw JSONL events
 bekas undo                     # Undo the most recent run
 bekas undo <run_id>            # Undo a specific run
 ```
@@ -197,8 +201,16 @@ bekas tui
 | `python.venvs` | `python.venv` | Orphaned Python virtual environments | — |
 | `python.cache` | `python.cache` | `__pycache__`, `.pytest_cache`, `.mypy_cache`, `.ruff_cache` | — |
 | `pip.cache` | `pip.cache` | Stale pip download & wheel cache | — |
+| `uv.cache` | `uv.cache` | UV package cache | — |
+| `poetry.cache` | `poetry.cache` | Poetry package cache | — |
 | `node.modules` | `node.modules` | Old `node_modules` directories | — |
+| `pnpm.store` | `pnpm.store` | PNPM global content-addressable store | — |
+| `yarn.cache` | `yarn.cache` | Yarn global cache | — |
 | `rust.target` | `rust.target` | Old `target/` build directories | — |
+| `cargo.registry` | `cargo.registry` | Cargo registry cache | — |
+| `go.modcache` | `go.modcache` | Go module cache | — |
+| `gradle.caches` | `gradle.caches` | Gradle wrapper & dependency caches | — |
+| `maven.repo` | `maven.repo` | Old Maven artifact versions (keeps latest 2) | — |
 | `git.branches` | `git.branch` | Fully-merged local branches | git |
 | `downloads` | `downloads.file` | Old files in `~/Downloads` | — |
 | `screenshots` | `screenshots.file` | Old screenshots (Desktop / Pictures) | — |
@@ -206,6 +218,12 @@ bekas tui
 | `system.trash` | `system.trash` | macOS/Linux Trash contents | — |
 | `dotfiles.backups` | `dotfiles.backups` | Backup files like `.zshrc.bak` | — |
 | `xcode.derived_data` | `xcode.derived_data` | Stale Xcode build caches (macOS only) | — |
+| `xcode.simulators` | `xcode.simulators` | Abandoned simulator runtimes (macOS only) | — |
+| `browser.chrome` | `browser.chrome` | Chrome/Chromium caches (macOS/Linux/Windows) | — |
+| `browser.firefox` | `browser.firefox` | Firefox caches | — |
+| `browser.safari` | `browser.safari` | Safari caches (macOS only) | — |
+| `vscode.extensions.orphan` | `vscode.extensions.orphan` | VS Code extensions not in extensions.json | — |
+| `jetbrains.caches` | `jetbrains.caches` | Old JetBrains IDE caches | — |
 
 Plugins are auto-discovered via `entry_points` in `pyproject.toml`. You can write your own by subclassing `bekas.plugin.Plugin`.
 
@@ -218,12 +236,13 @@ The first time you run `bekas`, a config file is created at the platform-specifi
 Example:
 
 ```yaml
-version: "0.2.0"
+version: "1"
 active_profile: default
 profiles:
   default:
     enabled_plugins: ["*"]
     quarantine_enabled: true
+    plugin_timeout_seconds: 60
     # Per-plugin thresholds
     plugin_settings:
       screenshots:
@@ -242,6 +261,12 @@ profiles:
         min_age_days: 30
       git.branches:
         min_idle_days: 90
+      cargo.registry:
+        min_idle_days: 60
+      gradle.caches:
+        min_idle_days: 90
+      maven.repo:
+        min_age_days: 180
     # Repositories for the git.branches plugin
     git_repos:
       - ~/code
@@ -261,8 +286,10 @@ profiles:
 - **Hard exclusions** — System paths and sensitive files are automatically excluded. See [`docs/SAFETY.md`](docs/SAFETY.md) for the full exclusion list.
 - **Quarantine** — Deletable files are moved to a quarantine folder so you can `restore` them later.
 - **Undo log** — Every `clean --apply` is recorded in SQLite with per-candidate results and undo tokens.
-- **Signed plans** — Saved plan files include a signature to detect tampering.
-- **Typed confirmation gate** — `clean --apply` requires typing `"yes"` (or a random token for high-risk plans) before any destructive action.
+- **Cache-first audits** — Repeated audits skip unchanged paths via the `audit_cache` SQLite table. Modify a file and only that entry invalidates.
+- **Per-plugin timeouts** — A hung plugin does not block the entire audit (default 60s).
+- **Structured event log** — Every `clean --apply` appends a JSONL event; `bekas history --since 30d` reads from it.
+- **Pydantic config validation** — Catches typos at load time with friendly error messages.
 
 
 ---
@@ -296,25 +323,46 @@ bekas/
 │       ├── pip_cache.py         # pip download & wheel cache
 │       ├── node_modules.py      # Old node_modules directories
 │       ├── rust_target.py       # Rust target/ directories
+│       ├── cargo_registry.py    # Cargo registry cache
+│       ├── go_modcache.py       # Go module cache
+│       ├── gradle_caches.py     # Gradle wrapper & dependency caches
+│       ├── maven_repo.py        # Old Maven artifact versions
 │       ├── git_branches.py      # Stale merged local branches
 │       ├── downloads.py         # Old files in ~/Downloads
 │       ├── screenshots.py       # Old screenshots
 │       ├── system_tmp.py        # Old temp files
 │       ├── system_trash.py      # macOS/Linux Trash
 │       ├── dotfiles_backups.py  # Dotfile backup files
-│       └── xcode_derived_data.py # Xcode DerivedData (macOS)
-├── tests/                       # pytest test suite (80%+ coverage)
+│       ├── xcode_derived_data.py # Xcode DerivedData (macOS)
+│       ├── xcode_simulators.py  # Abandoned Xcode simulators (macOS)
+│       ├── uv_cache.py          # UV package cache
+│       ├── poetry_cache.py      # Poetry package cache
+│       ├── pnpm_store.py        # PNPM global store
+│       ├── yarn_cache.py        # Yarn global cache
+│       ├── browser_chrome.py    # Chrome/Chromium caches
+│       ├── browser_firefox.py   # Firefox caches
+│       ├── browser_safari.py    # Safari caches (macOS)
+│       ├── vscode_extensions.py # VS Code orphan extensions
+│       └── jetbrains_caches.py  # Old JetBrains IDE caches
+├── tests/                       # pytest test suite
+├── docs/                        # Documentation
+│   └── SAFETY.md                # Full safety guide & exclusion rules
 ├── pyproject.toml               # Project metadata, deps, entry points
 └── README.md                    # This file
 ```
 
 ### Key design principles
 
-- **Plugin architecture** — Every scanner is a `Plugin`. The runner loads them via `entry_points`, so third-party plugins can be added without touching core code.
+- **Plugin architecture** — Every scanner is a `Plugin` with an explicit `Capabilities` manifest. The runner loads them via `entry_points`, so third-party plugins can be added without touching core code.
 - **Context-driven** — Each plugin receives a `Context` carrying the active profile, dry-run flag, and verbosity. This keeps plugins stateless and testable.
 - **Immutable models** — `Candidate`, `Plan`, `RemovalResult`, etc. are dataclasses with strong typing. `AuditReport` uses Pydantic for JSON serialization.
-- **Quarantine-first** — Plugins that support quarantine (`supports_quarantine() -> True`) move items to a staging area instead of deleting immediately. The CLI controls whether quarantine is enabled per profile.
-- **Audit trail** — `database.py` writes every run to an SQLite DB; `undo` reads it back and restores quarantined items via their undo tokens.
+- **Capability manifest** — Plugins declare `quarantine`, `parallel_safe`, `requires_network`, `requires_root`, `requires_cli`, `platforms`, and `estimated_runtime` so the runner can schedule smartly and skip incompatible plugins.
+- **Per-plugin timeouts** — A hard timeout (default 60s) per plugin prevents a hung scanner from blocking the entire audit.
+- **Audit cache** — `_fingerprint(path)` computes a `(size, mtime)` hash. Unchanged paths are skipped on re-audit; `--no-cache` and `--rebuild-cache` control the behavior.
+- **Pydantic config** — `Config`, `Profile`, and `PluginSettings` are Pydantic models. Validation catches typos at load time with friendly per-field errors.
+- **Quarantine-first** — Plugins that support quarantine (`capabilities.quarantine=True`) move items to a staging area instead of deleting immediately.
+- **Audit trail** — `database.py` writes every run to an SQLite DB and a rotating JSONL event log; `undo` restores quarantined items via their undo tokens.
+- **Structured event log** — `events.py` appends JSONL to `~/.local/share/bekas/events.jsonl` with rotation at 10 MB. `bekas history --since 30d` reads from it.
 
 ---
 
