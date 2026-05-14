@@ -1,6 +1,6 @@
 [project]
 name = "bekas"
-version = "0.3.0"
+version = "0.4.0"
 description = "A CLI utility that audits your local machine for stuff you forgot and helps you safely reclaim disk space."
 readme = "README.md"
 license = "MIT"
