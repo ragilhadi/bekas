@@ -55,7 +55,7 @@ def test_discover_and_remove(tmp_path, monkeypatch):
 
 def test_delete_with_trashinfo_linux(tmp_path, monkeypatch):
     """On Linux, deleting a trash item should also delete the .trashinfo file."""
-    if sys.platform == "darwin":
+    if sys.platform != "linux":
         pytest.skip("Linux-specific test")
 
     home = tmp_path

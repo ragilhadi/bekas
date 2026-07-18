@@ -112,7 +112,7 @@ def test_generic_remove_quarantine(tmp_path: Path):
         mock_move.return_value = Path("/quarantine/to_remove.txt")
         result = _generic_remove(c, ctx, quarantine_enabled=True, run_id="run_01")
     assert result.success is True
-    assert result.undo_token == "/quarantine/to_remove.txt"
+    assert result.undo_token == str(Path("/quarantine/to_remove.txt"))
 
 
 def test_generic_remove_delete(tmp_path: Path):

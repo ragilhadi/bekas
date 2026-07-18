@@ -2,10 +2,28 @@
 
 from __future__ import annotations
 
+import os
+import tempfile
+import uuid
 from pathlib import Path
+
+import pytest
 
 from bekas.models import Candidate, Confidence
 from bekas.safety import filter_candidates, is_excluded
+
+
+def _symlinks_available() -> bool:
+    """Creating symlinks on Windows needs a privilege regular users may lack."""
+    if os.name != "nt":
+        return True
+    link = Path(tempfile.gettempdir()) / f"bekas_symtest_{uuid.uuid4().hex}"
+    try:
+        link.symlink_to(Path(tempfile.gettempdir()))
+        link.unlink()
+        return True
+    except OSError:
+        return False
 
 
 def test_traversal_in_raw_path_is_blocked():
@@ -41,6 +59,7 @@ def test_user_exclusion_glob():
     assert is_excluded("/tmp/keep.txt", user_exclusions=["/tmp/backup*"]) is False
 
 
+@pytest.mark.skipif(not _symlinks_available(), reason="symlink creation not permitted")
 def test_symlink_resolution_is_excluded(tmp_path: Path) -> None:
     """Symlinks that resolve into excluded areas must be blocked."""
     secret = tmp_path / "real_secret"
@@ -71,7 +90,10 @@ def test_very_long_path(tmp_path: Path) -> None:
     deep = tmp_path
     for i in range(30):
         deep = deep / f"dir{i}"
-    deep.mkdir(parents=True)
+    try:
+        deep.mkdir(parents=True)
+    except OSError:
+        pytest.skip("filesystem rejects long paths (Windows MAX_PATH)")
     assert is_excluded(deep) is False
 
 
