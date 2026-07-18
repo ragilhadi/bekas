@@ -1,6 +1,12 @@
 """Tests for safety module — is_safe_to_delete and edge cases."""
 
+import os
+import sys
+import tempfile
+import uuid
 from pathlib import Path
+
+import pytest
 
 from bekas.safety import (
     _is_inside_active_venv,
@@ -108,6 +114,20 @@ def test_is_too_recent_with_threshold(tmp_path):
 # --- _is_symlink_outside_home ---
 
 
+def _symlinks_available() -> bool:
+    """Creating symlinks on Windows needs a privilege regular users may lack."""
+    if os.name != "nt":
+        return True
+    link = Path(tempfile.gettempdir()) / f"bekas_symtest_{uuid.uuid4().hex}"
+    try:
+        link.symlink_to(Path(tempfile.gettempdir()))
+        link.unlink()
+        return True
+    except OSError:
+        return False
+
+
+@pytest.mark.skipif(not _symlinks_available(), reason="symlink creation not permitted")
 def test_symlink_inside_home(tmp_path, monkeypatch):
     home = tmp_path / "home"
     home.mkdir()
@@ -163,6 +183,9 @@ def test_is_excluded_user_glob_star(tmp_path):
     assert is_excluded(f, user_exclusions=[str(tmp_path / "foo")]) is True
 
 
-def test_is_excluded_windows_paths_on_posix():
-    # Windows paths in _HARD_EXCLUSIONS won't resolve on POSIX but shouldn't crash
-    assert is_excluded(r"C:\Windows\System32") is False  # unresolved windows path → no match
+def test_is_excluded_windows_system_path_is_platform_dependent():
+    # On Windows, C:\Windows\System32 is a hard-excluded system path.
+    # On POSIX the same string is just an odd relative filename → no match,
+    # but it must not crash either way.
+    expected = sys.platform == "win32"
+    assert is_excluded(r"C:\Windows\System32") is expected

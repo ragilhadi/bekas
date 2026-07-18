@@ -26,7 +26,7 @@ from __future__ import annotations
 import fnmatch
 import os
 import re
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from bekas.models import Candidate
@@ -105,19 +105,15 @@ def _expand_exclusions() -> list[Path]:
             excl.append(Path(p).resolve())
         except (OSError, ValueError):
             continue
-    # Add home-level exclusions
+    # Add home-level exclusions. Note: %TEMP%, %LOCALAPPDATA%, and %APPDATA%
+    # are deliberately NOT excluded — bekas's own cleaning targets (browser
+    # caches, temp files, IDE caches) live there, mirroring how /tmp and
+    # ~/.cache are not hard-excluded on POSIX. Specific sensitive paths are
+    # still protected by _SENSITIVE_GLOBS and the system paths above.
     try:
         home = Path.home().resolve()
         for name in _SENSITIVE_NAMES:
             excl.append(home / name)
-        # Also exclude Windows %LOCALAPPDATA%, %APPDATA%, %TEMP% if applicable
-        for env in ("LOCALAPPDATA", "APPDATA", "TEMP"):
-            val = os.environ.get(env)
-            if val:
-                try:
-                    excl.append(Path(val).resolve())
-                except (OSError, ValueError):
-                    continue
     except RuntimeError:
         pass
     return excl
@@ -202,11 +198,13 @@ def _is_too_recent(path: Path, min_quiet_hours: int = 6) -> bool:
     Returns:
         True if the mtime is newer than the threshold.
     """
+    if min_quiet_hours <= 0:
+        return False
     try:
         stat = path.stat()
         mtime = datetime.fromtimestamp(stat.st_mtime, tz=UTC)
         age = datetime.now(UTC) - mtime
-        return age < __import__("datetime").timedelta(hours=min_quiet_hours)
+        return age < timedelta(hours=min_quiet_hours)
     except (OSError, ValueError):
         return False
 
@@ -231,6 +229,79 @@ def _is_inside_active_venv(path: Path) -> bool:
             except (OSError, RuntimeError):
                 continue
     return False
+
+
+def _glob_targets(raw: str, resolved: Path) -> list[str]:
+    """Return the strings a glob pattern should be matched against.
+
+    Both the resolved path and the caller-supplied raw path are candidates,
+    posix-normalized: on macOS ``/tmp`` resolves to ``/private/tmp`` and on
+    Windows separators differ, so matching only the resolved form silently
+    breaks patterns written against the path the user actually sees.
+
+    Args:
+        raw: The path string as originally supplied.
+        resolved: The fully resolved path.
+
+    Returns:
+        Deduplicated list of strings to match patterns against.
+    """
+    return list({resolved.as_posix(), Path(raw).as_posix()})
+
+
+def _sensitive_glob_match(raw: str, resolved: Path) -> str | None:
+    """Return the first sensitive glob matching the path, if any.
+
+    Args:
+        raw: The path string as originally supplied.
+        resolved: The fully resolved path.
+
+    Returns:
+        The matching pattern, or None.
+    """
+    targets = _glob_targets(raw, resolved)
+    for pattern in _SENSITIVE_GLOBS:
+        if any(fnmatch.fnmatch(t, pattern) for t in targets):
+            return pattern
+        # Also allow matching just the filename for simple patterns like *.key
+        if "/" not in pattern and fnmatch.fnmatch(resolved.name, pattern):
+            return pattern
+    return None
+
+
+def _user_exclusion_match(raw: str, resolved: Path, user_exclusions: list[str]) -> str | None:
+    """Return the first user exclusion pattern matching the path, if any.
+
+    Args:
+        raw: The path string as originally supplied.
+        resolved: The fully resolved path.
+        user_exclusions: User-defined exclusion patterns (globs or paths).
+
+    Returns:
+        The matching pattern as the user wrote it, or None.
+    """
+    home = str(Path.home())
+    targets = _glob_targets(raw, resolved)
+    for raw_pat in user_exclusions:
+        pat = raw_pat.replace("~/", home + "/")
+        # Support simple **/ glob
+        if "**" in pat:
+            parts = pat.replace("**", "").strip("/").split("/")
+            # crude containment match
+            if all(any(part in t for t in targets) for part in parts if part):
+                return raw_pat
+        else:
+            for t in targets:
+                if fnmatch.fnmatch(t, pat) or fnmatch.fnmatch(t, pat + "/*"):
+                    return raw_pat
+        # Exact directory match
+        try:
+            rp = Path(pat).resolve()
+            if resolved == rp or _is_ancestor(rp, resolved):
+                return raw_pat
+        except (OSError, ValueError):
+            continue
+    return None
 
 
 def is_excluded(
@@ -273,14 +344,9 @@ def is_excluded(
         except (OSError, ValueError, RuntimeError):
             return True
 
-    # Sensitive globs (check against resolved path)
-    sp = str(resolved)
-    for pattern in _SENSITIVE_GLOBS:
-        if fnmatch.fnmatch(sp, pattern):
-            return True
-        # Also allow matching just the filename for simple patterns like *.key
-        if "/" not in pattern and fnmatch.fnmatch(resolved.name, pattern):
-            return True
+    # Sensitive globs (checked against both raw and resolved forms)
+    if _sensitive_glob_match(raw_str, resolved) is not None:
+        return True
 
     # Symlink pointing outside home
     if _is_symlink_outside_home(resolved):
@@ -299,28 +365,7 @@ def is_excluded(
         return True
 
     # User-defined exclusions
-    if user_exclusions:
-        home = str(Path.home())
-        for raw in user_exclusions:
-            pat = raw.replace("~/", home + "/")
-            # Support simple **/ glob
-            if "**" in pat:
-                parts = pat.replace("**", "").strip("/").split("/")
-                # crude containment match
-                if all(part in sp for part in parts if part):
-                    return True
-            else:
-                if fnmatch.fnmatch(sp, pat) or fnmatch.fnmatch(sp, pat + "/*"):
-                    return True
-            # Exact directory match
-            try:
-                rp = Path(pat).resolve()
-                if resolved == rp or _is_ancestor(rp, resolved):
-                    return True
-            except (OSError, ValueError):
-                continue
-
-    return False
+    return bool(user_exclusions) and _user_exclusion_match(raw_str, resolved, user_exclusions or []) is not None
 
 
 def is_safe_to_delete(
@@ -363,12 +408,9 @@ def is_safe_to_delete(
         except (OSError, ValueError, RuntimeError):
             return (False, "error checking system exclusions")
 
-    sp = str(resolved)
-    for pattern in _SENSITIVE_GLOBS:
-        if fnmatch.fnmatch(sp, pattern):
-            return (False, f"sensitive glob match: {pattern}")
-        if "/" not in pattern and fnmatch.fnmatch(resolved.name, pattern):
-            return (False, f"sensitive name match: {pattern}")
+    sensitive = _sensitive_glob_match(raw_str, resolved)
+    if sensitive is not None:
+        return (False, f"sensitive glob match: {sensitive}")
 
     if _is_symlink_outside_home(resolved):
         return (False, "symlink points outside home directory")
@@ -383,22 +425,9 @@ def is_safe_to_delete(
         return (False, "inside active virtual environment")
 
     if user_exclusions:
-        home = str(Path.home())
-        for raw in user_exclusions:
-            pat = raw.replace("~/", home + "/")
-            if "**" in pat:
-                parts = pat.replace("**", "").strip("/").split("/")
-                if all(part in sp for part in parts if part):
-                    return (False, f"user exclusion: {raw}")
-            else:
-                if fnmatch.fnmatch(sp, pat) or fnmatch.fnmatch(sp, pat + "/*"):
-                    return (False, f"user exclusion: {raw}")
-            try:
-                rp = Path(pat).resolve()
-                if resolved == rp or _is_ancestor(rp, resolved):
-                    return (False, f"user exclusion: {raw}")
-            except (OSError, ValueError):
-                continue
+        matched = _user_exclusion_match(raw_str, resolved, user_exclusions)
+        if matched is not None:
+            return (False, f"user exclusion: {matched}")
 
     return (True, "")
 

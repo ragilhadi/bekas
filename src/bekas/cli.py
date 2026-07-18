@@ -236,26 +236,24 @@ def clean_cmd(
     quarantine_enabled = profile.quarantine_enabled
 
     # Acquire single-instance lock for mutating commands
-    from bekas.locking import acquire_lock
+    from bekas.locking import ProcessLock
 
     try:
-        lock = acquire_lock()
+        with ProcessLock():
+            result = apply_plan(
+                plan,
+                _get_plugins(),
+                ctx_obj,
+                audit=report,
+                yes_all=yes_all or non_interactive,
+                quarantine_enabled=quarantine_enabled,
+                profile_name=profile_name,
+                non_interactive=non_interactive,
+                force_stale=force_stale,
+            )
     except AlreadyRunningError as exc:
         click.echo(str(exc))
         sys.exit(3)
-
-    with lock:
-        result = apply_plan(
-            plan,
-            _get_plugins(),
-            ctx_obj,
-            audit=report,
-            yes_all=yes_all or non_interactive,
-            quarantine_enabled=quarantine_enabled,
-            profile_name=profile_name,
-            non_interactive=non_interactive,
-            force_stale=force_stale,
-        )
 
     if ctx.obj.get("json"):
         click.echo(format_json(result))
@@ -316,8 +314,8 @@ def history_cmd(ctx: click.Context, run_id: str | None, since: int | None, json_
     click.echo(f"{'Run ID':18s} {'Time':20s} {'Event':18s} {'Items':>6s} {'Freed':>12s}")
     for ev in events[:50]:
         click.echo(
-            f"{ev.get('run_id',''):18s} {ev.get('ts',''):20s} {ev.get('event',''):18s} "
-            f"{ev.get('items_total',0):>6d} {_human_size(ev.get('bytes_reclaimed',0)):>12s}"
+            f"{ev.get('run_id', ''):18s} {ev.get('ts', ''):20s} {ev.get('event', ''):18s} "
+            f"{ev.get('items_total', 0):>6d} {_human_size(ev.get('bytes_reclaimed', 0)):>12s}"
         )
 
 

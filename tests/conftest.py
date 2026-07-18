@@ -15,7 +15,6 @@ def _patch_data_dir(monkeypatch):
     import bekas.clean as clean_mod
     import bekas.cli as cli_mod
     import bekas.config as cfg
-    import bekas.locking as locking_mod
     import bekas.runner as runner_mod
 
     tmp = tempfile.mkdtemp()
@@ -39,9 +38,6 @@ def _patch_data_dir(monkeypatch):
         if hasattr(mod, "profile_for"):
             monkeypatch.setattr(mod, "profile_for", lambda n=None: _permissive)
     monkeypatch.setattr(cli_mod, "ensure_config", lambda: config_file)
-    monkeypatch.setattr(
-        locking_mod, "acquire_lock", lambda lock_file=None: locking_mod.ProcessLock(lock_file or ddir / ".test.lock")
-    )
 
 
 @pytest.fixture

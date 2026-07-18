@@ -68,17 +68,18 @@ class ScreenshotsPlugin(Plugin):
     def _screenshot_folders(self) -> list[Path]:
         """Return platform-specific screenshot directories.
 
+        ``~/Pictures/Screenshots`` is scanned on every platform; macOS
+        additionally scans ``~/Desktop``, its default screenshot location.
+        Folders that do not exist are skipped by ``discover``.
+
         Returns:
             List of Paths to search for screenshots.
         """
-        system = platform.system().lower()
         home = Path.home()
-        if system == "darwin":
-            return [home / "Desktop"]
-        if system == "windows":
-            return [home / "Pictures" / "Screenshots"]
-        # Linux and default
-        return [home / "Pictures" / "Screenshots"]
+        folders = [home / "Pictures" / "Screenshots"]
+        if platform.system().lower() == "darwin":
+            folders.insert(0, home / "Desktop")
+        return folders
 
     def remove(self, candidate: Candidate, ctx: Context) -> RemovalResult:
         """Delete a screenshot file.

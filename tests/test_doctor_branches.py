@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from unittest.mock import patch
+
+import pytest
 
 from bekas.doctor import (
     CheckResult,
@@ -63,6 +66,8 @@ def test_check_config_missing_profiles(tmp_path):
 
 def test_check_quarantine_not_writable(tmp_path):
     """Quarantine directory not writable."""
+    if os.name == "nt":
+        pytest.skip("chmod cannot make a directory read-only on Windows")
     qdir = tmp_path / "readonly_q"
     qdir.mkdir()
     qdir.chmod(0o555)
