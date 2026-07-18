@@ -20,7 +20,6 @@ def _patch_data_dir(monkeypatch):
     import bekas.clean as clean_mod
     import bekas.cli as cli_mod
     import bekas.config as cfg
-    import bekas.locking as locking_mod
     import bekas.runner as runner_mod
 
     tmp = tempfile.mkdtemp()
@@ -43,9 +42,6 @@ def _patch_data_dir(monkeypatch):
         if hasattr(mod, "profile_for"):
             monkeypatch.setattr(mod, "profile_for", lambda n=None: _permissive)
     monkeypatch.setattr(cli_mod, "ensure_config", lambda: cdir / "config.yaml")
-    monkeypatch.setattr(
-        locking_mod, "acquire_lock", lambda lock_file=None: locking_mod.ProcessLock(lock_file or ddir / ".test.lock")
-    )
 
 
 @pytest.fixture
@@ -175,6 +171,33 @@ def test_cli_dry_run_defaults(runner, monkeypatch):
     result = runner.invoke(cli, ["clean"])
     assert result.exit_code == 0
     assert "Dry run mode" in result.output
+
+
+def test_cli_clean_apply_exits_3_when_lock_held(runner, monkeypatch):
+    """clean --apply exits 3 with a friendly message when the lock is held."""
+    from bekas.locking import ProcessLock
+
+    monkeypatch.setattr("bekas.cli.discover_plugins", lambda: [_FakePlugin()])
+    holder = ProcessLock()  # same default path as clean's lock (patched data dir)
+    holder.acquire()
+    try:
+        result = runner.invoke(cli, ["clean", "--apply", "--yes-all"])
+    finally:
+        holder.release()
+    assert result.exit_code == 3
+    assert "Another bekas process is running" in result.output
+
+
+def test_cli_clean_apply_releases_lock_for_next_run(runner, monkeypatch):
+    """After a clean --apply finishes, the lock must be free again."""
+    from bekas.locking import ProcessLock
+
+    monkeypatch.setattr("bekas.cli.discover_plugins", lambda: [_FakePlugin()])
+    result = runner.invoke(cli, ["clean", "--apply", "--yes-all"])
+    assert result.exit_code == 0
+    lock = ProcessLock()
+    lock.acquire()  # must not raise
+    lock.release()
 
 
 def test_cli_quarantine_list_empty(runner, monkeypatch):

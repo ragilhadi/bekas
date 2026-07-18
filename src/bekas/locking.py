@@ -3,36 +3,48 @@
 from __future__ import annotations
 
 import os
-import platform
+import sys
 from pathlib import Path
 from typing import Any
 
 from bekas.config import data_dir
 
+# Windows: lock a single byte well past any PID data so that other handles
+# (including other processes reading the holder's PID) are never blocked by
+# the mandatory byte-range lock.
+_LOCK_REGION_OFFSET = 4096
+
 
 class AlreadyRunningError(Exception):
     """Raised when another bekas process holds the lock."""
 
-    def __init__(self, pid: int) -> None:
+    def __init__(self, pid: int | None, lock_file: Path | None = None) -> None:
         """Initialize with the PID of the competing process.
 
         Args:
-            pid: Process ID holding the lock.
+            pid: Process ID holding the lock, or None if it could not be read.
+            lock_file: Path to the contended lock file, if known.
         """
-        super().__init__(f"Another bekas process is running (PID {pid}). Exiting.")
-        self.pid = pid
+        who = f"PID {pid}" if pid else "PID unknown"
+        msg = f"Another bekas process is running ({who}). Exiting."
+        if lock_file is not None:
+            msg += f" Lock file: {lock_file}"
+        super().__init__(msg)
+        self.pid = pid or 0
 
 
 class ProcessLock:
     """Cross-platform file-based process lock.
 
-    Uses ``fcntl.flock`` on POSIX and ``msvcrt.locking`` on Windows.
-    Stale locks (where the owning PID is dead) are reclaimed automatically.
+    Uses ``fcntl.flock`` on POSIX and ``msvcrt.locking`` on Windows. The
+    kernel lock is the single source of truth: it is released automatically
+    when the owning process exits for any reason (including SIGKILL), so a
+    leftover lock file never blocks a new process. The PID written into the
+    file is informational only, used for error messages on contention.
 
     Attributes:
         lock_file: Path to the lock file.
-        _fd: File descriptor of the opened lock file (POSIX).
-        _handle: File handle (Windows).
+        _fd: Open file handle holding the lock, or None when not held.
     """
 
     def __init__(self, lock_file: Path | None = None) -> None:
@@ -43,126 +55,91 @@ class ProcessLock:
         """
         self.lock_file = lock_file or (data_dir() / "bekas.lock")
         self._fd: Any = None
-        self._handle: Any = None
 
-    def _read_stale_pid(self) -> int | None:
-        """Read the PID from the lock file if it exists and is valid.
+    def _read_pid(self) -> int | None:
+        """Best-effort read of the holder's PID for error messages.
 
         Returns:
-            The stored PID, or None if the file does not exist, is unreadable,
-            or contains an invalid PID (<= 0).
+            The stored PID, or None if the file is missing, unreadable, or
+            does not contain a positive integer.
         """
         try:
             pid = int(self.lock_file.read_text().strip())
-            if pid <= 0:
-                return None
-            return pid
+            return pid if pid > 0 else None
         except Exception:
             return None
-
-    def _is_pid_alive(self, pid: int) -> bool:
-        """Check whether a process with the given PID is still running.
-
-        Args:
-            pid: Process ID to check.
-
-        Returns:
-            True if the process exists, False otherwise.
-        """
-        if pid <= 0:
-            return False
-        try:
-            os.kill(pid, 0)
-            return True
-        except (OSError, ProcessLookupError):
-            return False
 
     def acquire(self) -> None:
         """Acquire the lock, raising if another live process holds it.
 
-        On contention, raises :class:`AlreadyRunningError` with exit code 3
-        semantics. Stale locks from dead processes are silently reclaimed.
+        Idempotent: calling acquire on a lock this instance already holds is
+        a no-op. Lock files left behind by dead processes (crash, SIGKILL)
+        carry no kernel lock and are reclaimed transparently.
 
         Raises:
             AlreadyRunningError: If another live process holds the lock.
             OSError: If the lock file cannot be created or written.
         """
+        if self._fd is not None:
+            return
+
         self.lock_file.parent.mkdir(parents=True, exist_ok=True)
-        stale_pid = self._read_stale_pid()
-        if stale_pid is not None and stale_pid != os.getpid() and self._is_pid_alive(stale_pid):
-            raise AlreadyRunningError(stale_pid)
-
-        if platform.system() == "Windows":
-            self._acquire_windows()
-        else:
-            self._acquire_posix()
-
-        # Write our PID into the lock file
-        self.lock_file.write_text(str(os.getpid()))
-
-    def _acquire_posix(self) -> None:
-        """Acquire an exclusive lock via ``fcntl.flock``.
-
-        Raises:
-            AlreadyRunningError: If another process holds the lock.
-            OSError: On lock acquisition failure.
-        """
-        import fcntl
-
-        fd = open(self.lock_file, "w")
+        # "a+" so an existing holder's PID file is never truncated before we
+        # actually own the kernel lock.
+        fd = open(self.lock_file, "a+")
         try:
-            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except (BlockingIOError, OSError):
-            fd.close()
-            raise AlreadyRunningError(0) from None
-        self._fd = fd
+            if sys.platform == "win32":
+                import msvcrt
 
-    def _acquire_windows(self) -> None:
-        """Acquire an exclusive lock via ``msvcrt.locking``.
+                fd.seek(_LOCK_REGION_OFFSET)
+                msvcrt.locking(fd.fileno(), msvcrt.LK_NBLCK, 1)
+            else:
+                import fcntl
 
-        Raises:
-            AlreadyRunningError: If another process holds the lock.
-            OSError: On lock acquisition failure.
-        """
-        import msvcrt
-
-        handle = open(self.lock_file, "w")
-        try:
-            msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except OSError:
-            handle.close()
-            raise AlreadyRunningError(0) from None
-        self._handle = handle
+            fd.close()
+            raise AlreadyRunningError(self._read_pid(), self.lock_file) from None
+
+        self._fd = fd
+        # Record our PID through the same handle (a second handle would hit
+        # the mandatory byte-range lock on Windows).
+        fd.seek(0)
+        fd.truncate()
+        fd.write(str(os.getpid()))
+        fd.flush()
 
     def release(self) -> None:
-        """Release the lock and clean up the lock file.
+        """Release the lock and clear the recorded PID.
 
-        Safe to call even if the lock was never acquired.
+        Safe to call even if the lock was never acquired. The lock file is
+        truncated rather than deleted: unlinking would allow a new process to
+        recreate the file and lock a different inode while a third process
+        still races on the old one.
         """
+        fd, self._fd = self._fd, None
+        if fd is None:
+            return
         try:
-            if platform.system() == "Windows":
-                if self._handle is not None:
-                    import msvcrt
+            fd.seek(0)
+            fd.truncate()
+            fd.flush()
+            if sys.platform == "win32":
+                import msvcrt
 
-                    msvcrt.locking(self._handle.fileno(), msvcrt.LK_UNLCK, 1)
-                    self._handle.close()
-                    self._handle = None
+                fd.seek(_LOCK_REGION_OFFSET)
+                msvcrt.locking(fd.fileno(), msvcrt.LK_UNLCK, 1)
             else:
-                if self._fd is not None:
-                    import fcntl
+                import fcntl
 
-                    fcntl.flock(self._fd, fcntl.LOCK_UN)
-                    self._fd.close()
-                    self._fd = None
+                fcntl.flock(fd, fcntl.LOCK_UN)
+        except OSError:
+            pass
         finally:
-            try:
-                if self.lock_file.exists():
-                    self.lock_file.unlink()
-            except OSError:
-                pass
+            fd.close()
 
     def __enter__(self) -> ProcessLock:
-        """Context manager entry: acquire the lock.
+        """Context manager entry: acquire the lock (no-op if already held).
 
         Returns:
             Self for use in ``with`` statements.
