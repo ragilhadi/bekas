@@ -1,0 +1,41 @@
+---
+title: Installation
+description: Install bekas with pipx, uv or pip.
+---
+
+bekas requires **Python 3.11+**.
+
+```bash
+# pipx (recommended — keeps bekas isolated)
+pipx install bekas
+
+# uv
+uv tool install bekas
+
+# plain pip
+pip install bekas
+```
+
+Verify the install and your environment:
+
+```bash
+bekas --help
+bekas doctor
+```
+
+Some plugins need external tools (`docker`, `git`). Missing tools only disable the related plugins; see [`bekas doctor`](/reference/commands/#bekas-doctor).
+
+## From source
+
+```bash
+git clone https://github.com/ragilhadi/bekas
+cd bekas
+pip install -e ".[dev]"
+pytest
+```
+
+## Upgrading
+
+```bash
+pipx upgrade bekas     # or: uv tool upgrade bekas
+```

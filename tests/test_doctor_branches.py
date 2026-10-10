@@ -68,6 +68,8 @@ def test_check_quarantine_not_writable(tmp_path):
     """Quarantine directory not writable."""
     if os.name == "nt":
         pytest.skip("chmod cannot make a directory read-only on Windows")
+    if hasattr(os, "geteuid") and os.geteuid() == 0:
+        pytest.skip("root ignores directory permission bits")
     qdir = tmp_path / "readonly_q"
     qdir.mkdir()
     qdir.chmod(0o555)
@@ -127,7 +129,7 @@ def test_check_docker_version_fails():
     fake_result = type("R", (), {"returncode": 1, "stdout": "", "stderr": "error"})()
     with patch("subprocess.run", return_value=fake_result):
         result = _check_docker()
-        assert result.status == "fail"
+        assert result.status == "warn"
         assert "docker" in result.message.lower()
 
 

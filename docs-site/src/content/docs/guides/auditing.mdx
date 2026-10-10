@@ -1,0 +1,34 @@
+---
+title: Auditing
+description: Scan for forgotten files, filter by plugin, sort results and use the audit cache.
+---
+
+```bash
+bekas audit                    # human-readable report
+bekas --json audit             # JSON report
+bekas audit --plugin docker.images,node.modules
+bekas audit --serial           # one plugin at a time
+bekas audit --sort-by size     # size | age | tier
+bekas audit --top 20           # top N candidates per plugin
+```
+
+## The audit cache
+
+Repeated audits skip unchanged paths using a `(size, mtime)` fingerprint.
+
+```bash
+bekas audit --no-cache         # bypass the cache once
+bekas audit --rebuild-cache    # clear and rebuild it
+```
+
+## Inspecting a candidate
+
+```bash
+bekas inspect node:/home/me/old-project/node_modules
+```
+
+Prints the category, size, confidence, reason, path and plugin metadata.
+
+## Timeouts
+
+Each plugin has a hard timeout (`plugin_timeout_seconds`, default 60). A timed-out plugin is reported with an error and the rest of the audit continues.

@@ -230,6 +230,67 @@ def is_plugin_enabled(patterns: list[str], plugin_name: str) -> bool:
     return False
 
 
+def set_plugin_enabled(
+    plugin_name: str,
+    enabled: bool,
+    all_plugin_names: list[str],
+    profile_name: str | None = None,
+) -> tuple[bool, str]:
+    """Enable or disable a plugin by editing the config file.
+
+    Wildcard entries that match the plugin are expanded into explicit plugin
+    names when disabling, so that only the requested plugin is removed.
+    The file is rewritten with ``yaml.safe_dump`` (comments are not preserved).
+
+    Args:
+        plugin_name: Exact plugin name, e.g. ``"uv.cache"``.
+        enabled: True to enable the plugin, False to disable it.
+        all_plugin_names: Names of every installed plugin (used to expand globs).
+        profile_name: Profile to edit. Defaults to the active profile.
+
+    Returns:
+        Tuple of (changed, message).
+    """
+    import fnmatch
+
+    if plugin_name not in all_plugin_names:
+        return False, f"Unknown plugin: {plugin_name}. Run 'bekas plugins list' to see available plugins."
+
+    path = ensure_config()
+    with path.open() as f:
+        raw = yaml.safe_load(f) or {}
+    target = profile_name or raw.get("active_profile", "default")
+    profiles = raw.setdefault("profiles", {})
+    if target not in profiles:
+        return False, f"Profile not found: {target}"
+    profile = profiles[target] or {}
+    patterns: list[str] = list(profile.get("enabled_plugins", ["*"]))
+    currently = is_plugin_enabled(patterns, plugin_name)
+
+    if enabled:
+        if currently:
+            return False, f"{plugin_name} is already enabled in profile '{target}'."
+        patterns.append(plugin_name)
+    else:
+        if not currently:
+            return False, f"{plugin_name} is already disabled in profile '{target}'."
+        new_patterns: list[str] = []
+        for pat in patterns:
+            if pat == plugin_name:
+                continue
+            if fnmatch.fnmatch(plugin_name, pat) or pat == "*":
+                new_patterns.extend(n for n in all_plugin_names if fnmatch.fnmatch(n, pat) and n != plugin_name)
+            else:
+                new_patterns.append(pat)
+        patterns = list(dict.fromkeys(new_patterns))
+
+    profile["enabled_plugins"] = patterns
+    profiles[target] = profile
+    path.write_text(yaml.safe_dump(raw, sort_keys=False))
+    verb = "Enabled" if enabled else "Disabled"
+    return True, f"{verb} {plugin_name} in profile '{target}'."
+
+
 def validate_config_file(path: Path | None = None) -> tuple[bool, str]:
     """Validate a configuration file and return a friendly message.
 

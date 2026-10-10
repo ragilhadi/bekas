@@ -1,0 +1,46 @@
+---
+title: Planning & Cleaning
+description: Preview, save signed plans, and apply cleanups safely.
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+## Plan
+
+```bash
+bekas plan                     # preview
+bekas plan --safe-only         # only SAFE items
+bekas plan --include-review    # also REVIEW items
+bekas plan --save plan.json    # write a signed plan file
+```
+
+## Clean
+
+`clean` is a dry run unless you pass `--apply`.
+
+```bash
+bekas clean                          # preview only
+bekas clean --apply --safe-only      # remove SAFE items
+bekas clean --apply --review         # include REVIEW items (interactive)
+bekas clean --apply --yes-all        # skip per-category prompts
+bekas clean --apply --plan-file plan.json
+```
+
+| Option | Meaning |
+|---|---|
+| `--apply` | Actually remove things |
+| `--safe-only` | Only SAFE-tier candidates |
+| `--review` | Include REVIEW-tier candidates |
+| `--yes-all` | Skip prompts |
+| `--non-interactive` | For CI; needs `--yes-all` or `--accept-categories` |
+| `--accept-categories` | Comma-separated whitelist, e.g. `docker,node` |
+| `--plan-file` | Apply a saved, signed plan |
+| `--force-stale` | Apply a plan even if candidates changed since it was made |
+
+<Aside type="caution">
+Stale plans are validated before applying: candidates that changed or disappeared since the plan was saved are skipped unless you use `--force-stale`.
+</Aside>
+
+## One clean at a time
+
+`clean --apply` takes a single-instance lock. If another `bekas clean --apply` is genuinely running you get exit code `3`. See [Troubleshooting](/reference/troubleshooting/#another-bekas-process-is-running).

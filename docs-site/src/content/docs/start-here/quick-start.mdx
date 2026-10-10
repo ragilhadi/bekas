@@ -1,0 +1,40 @@
+---
+title: Quick Start
+description: Run your first audit, preview a plan, clean safely and undo.
+---
+
+import { Steps, Aside } from '@astrojs/starlight/components';
+
+<Steps>
+
+1. **Audit** — a read-only scan of every enabled plugin.
+
+   ```bash
+   bekas audit
+   ```
+
+2. **Plan** — see exactly what `clean` would remove.
+
+   ```bash
+   bekas plan --safe-only
+   ```
+
+3. **Clean** — nothing is deleted until you add `--apply`.
+
+   ```bash
+   bekas clean --safe-only          # dry run
+   bekas clean --apply --safe-only  # for real
+   ```
+
+4. **Undo** — restore what was quarantined.
+
+   ```bash
+   bekas history
+   bekas undo
+   ```
+
+</Steps>
+
+<Aside type="note">
+Items from plugins that do not support quarantine (for example `python.cache`) are deleted permanently. `bekas undo` tells you how many items could not be restored.
+</Aside>

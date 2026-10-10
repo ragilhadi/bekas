@@ -1,0 +1,48 @@
+---
+title: Writing a Plugin
+description: Add your own scanner by subclassing Plugin and registering an entry point.
+---
+
+```python
+from collections.abc import Iterator
+from pathlib import Path
+
+from bekas.models import Candidate, Confidence, Context, RemovalResult
+from bekas.plugin import Capabilities, Plugin
+
+
+class OldLogsPlugin(Plugin):
+    name = "old.logs"
+    description = "Finds old *.log files in ~/logs."
+    capabilities = Capabilities(quarantine=True, estimated_runtime="fast")
+
+    def is_available(self, ctx: Context) -> bool:
+        return (Path.home() / "logs").is_dir()
+
+    def discover(self, ctx: Context) -> Iterator[Candidate]:
+        for f in (Path.home() / "logs").glob("*.log"):
+            yield Candidate(
+                id=f"log:{f.name}",
+                category="old.logs",
+                size_bytes=f.stat().st_size,
+                path_or_handle=str(f),
+                confidence=Confidence.SAFE,
+                reason="Log file",
+                metadata={},
+            )
+
+    def remove(self, candidate: Candidate, ctx: Context) -> RemovalResult:
+        p = Path(candidate.path_or_handle)
+        size = p.stat().st_size
+        p.unlink()
+        return RemovalResult(success=True, bytes_freed=size, log="deleted")
+```
+
+Register it in your package's `pyproject.toml`:
+
+```toml
+[project.entry-points."bekas.plugins"]
+old_logs = "mypkg.plugins:OldLogsPlugin"
+```
+
+Candidates always pass through bekas's safety filter before they are shown or acted upon.

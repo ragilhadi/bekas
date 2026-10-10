@@ -1,0 +1,51 @@
+---
+title: Configuration
+description: The bekas config file, profiles, plugin settings and the plugins enable/disable commands.
+---
+
+The config file is created on first run:
+
+| OS | Path |
+|---|---|
+| Linux | `~/.config/bekas/config.yaml` |
+| macOS | `~/Library/Application Support/bekas/config.yaml` |
+| Windows | `%LOCALAPPDATA%\bekas\config.yaml` |
+
+```yaml
+version: "1"
+active_profile: default
+exclude: []
+profiles:
+  default:
+    enabled_plugins: ["docker.*", "python.*", "node.modules", "downloads"]
+    quarantine_enabled: true
+    quarantine_retention_days: 30
+    min_quiet_hours: 6
+    plugin_timeout_seconds: 60
+    safety_threshold: safe
+    git_repos: ["~/code"]
+    plugin_settings:
+      downloads:
+        min_age_days: 180
+      node.modules:
+        min_idle_days: 180
+```
+
+## Commands
+
+```bash
+bekas config show               # print the config
+bekas config show --resolved    # effective profile after merge
+bekas config validate
+bekas --profile ci-runner audit # use another profile
+```
+
+## Enable / disable plugins
+
+```bash
+bekas plugins list
+bekas plugins enable uv.cache
+bekas plugins disable python.cache
+```
+
+These commands edit `enabled_plugins` in the selected profile. Disabling a plugin matched by a wildcard (`python.*`, `*`) expands the wildcard into explicit names minus the one you disabled. The file is rewritten as plain YAML, so comments are not preserved.

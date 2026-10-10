@@ -1,0 +1,12 @@
+---
+title: Using the TUI
+description: Browse candidates interactively with the Textual terminal UI.
+---
+
+```bash
+bekas tui
+```
+
+The TUI runs the audit in a background worker so the interface stays responsive, then lets you browse candidates and clean interactively. It needs the `textual` dependency, which is installed with bekas.
+
+If the TUI fails to start, `bekas tui` prints `TUI not available` and exits with code 1; run `bekas doctor` to check your environment.

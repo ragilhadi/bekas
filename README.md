@@ -32,6 +32,7 @@ One audit. Every kind of forgotten thing. Nothing deleted you cared about.
 - [Safety Model](#safety-model)
 - [Comparison](#comparison)
 - [Architecture & File Structure](#architecture--file-structure)
+- [Documentation site](#documentation-site)
 - [License](#license)
 
 ---
@@ -114,7 +115,7 @@ Options:
 
 - `--apply` — Actually delete (default is dry-run).
 - `--safe-only` — Only include `SAFE`-tier candidates.
-- `--review` / `--include-review` — Include `REVIEW`-tier candidates.
+- `--review` — Include `REVIEW`-tier candidates.
 - `--yes-all` — Skip all interactive prompts.
 - `--non-interactive` — Requires `--accept-categories`.
 - `--accept-categories` — Comma-separated category whitelist for non-interactive runs.
@@ -135,8 +136,8 @@ Every `clean --apply` is persisted to an SQLite undo log and a structured JSONL 
 ```bash
 bekas history                  # List past runs
 bekas history <run_id>         # Show details for one run
-bekas history --since 30d      # Show events from the last 30 days
-bekas history --since 30d --json  # Dump raw JSONL events
+bekas history --since 720      # Show events from the last 720 hours (30 days)
+bekas history --since 720 --json  # JSON output
 bekas undo                     # Undo the most recent run
 bekas undo <run_id>            # Undo a specific run
 ```
@@ -166,7 +167,7 @@ bekas plugins disable <name>   # Disable a plugin (edit config)
 Print the current effective configuration.
 
 ```bash
-bekas config
+bekas config show
 bekas config show --resolved   # Effective config after profile merge
 bekas config validate            # Validate config file syntax
 ```
@@ -288,7 +289,7 @@ profiles:
 - **Undo log** — Every `clean --apply` is recorded in SQLite with per-candidate results and undo tokens.
 - **Cache-first audits** — Repeated audits skip unchanged paths via the `audit_cache` SQLite table. Modify a file and only that entry invalidates.
 - **Per-plugin timeouts** — A hung plugin does not block the entire audit (default 60s).
-- **Structured event log** — Every `clean --apply` appends a JSONL event; `bekas history --since 30d` reads from it.
+- **Structured event log** — Every `clean --apply` appends a JSONL event; `bekas history --since 720` reads from it.
 - **Pydantic config validation** — Catches typos at load time with friendly error messages.
 
 
@@ -362,7 +363,13 @@ bekas/
 - **Pydantic config** — `Config`, `Profile`, and `PluginSettings` are Pydantic models. Validation catches typos at load time with friendly per-field errors.
 - **Quarantine-first** — Plugins that support quarantine (`capabilities.quarantine=True`) move items to a staging area instead of deleting immediately.
 - **Audit trail** — `database.py` writes every run to an SQLite DB and a rotating JSONL event log; `undo` restores quarantined items via their undo tokens.
-- **Structured event log** — `events.py` appends JSONL to `~/.local/share/bekas/events.jsonl` with rotation at 10 MB. `bekas history --since 30d` reads from it.
+- **Structured event log** — `events.py` appends JSONL to `~/.local/share/bekas/events.jsonl` with rotation at 10 MB. `bekas history --since 720` reads from it.
+
+---
+
+## Documentation site
+
+Full guides and reference live in [`docs-site/`](docs-site/) (Astro Starlight). Run it locally with `cd docs-site && npm install && npm run dev`.
 
 ---
 

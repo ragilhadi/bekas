@@ -1,0 +1,38 @@
+---
+title: Quarantine, History & Undo
+description: How removed items are held, listed, restored, purged and logged.
+---
+
+## Quarantine
+
+For plugins that support it, `clean --apply` **moves** items into the quarantine folder rather than deleting them.
+
+```bash
+bekas quarantine list
+bekas quarantine restore <quarantine_id>
+bekas quarantine purge          # empty it now
+```
+
+Items older than `quarantine_retention_days` (default 30) are purged automatically at the start of the next `clean --apply`.
+
+<br />
+
+The quarantine folder lives inside bekas's data directory, which is **excluded from every audit** so quarantined items are never rediscovered as new candidates.
+
+## History
+
+```bash
+bekas history                   # list runs
+bekas history <run_id>          # details for one run
+bekas history --since 24        # events from the last 24 hours
+bekas history --json
+```
+
+## Undo
+
+```bash
+bekas undo                      # most recent run
+bekas undo <run_id>
+```
+
+`undo` restores every quarantined item of the run. Items removed permanently (plugins without quarantine support, or runs with quarantine disabled) cannot be restored; `undo` reports how many.

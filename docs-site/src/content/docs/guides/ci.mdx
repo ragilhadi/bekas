@@ -1,0 +1,30 @@
+---
+title: Running in CI
+description: Non-interactive cleaning with accepted categories and signed plans.
+---
+
+```bash
+# Clean only whitelisted categories, no prompts
+bekas clean --apply --non-interactive --accept-categories "docker,python,node"
+
+# Or build a signed plan on one machine and apply it on another
+bekas plan --safe-only --save plan.json
+bekas clean --apply --yes-all --non-interactive --plan-file plan.json
+```
+
+`--non-interactive` requires `--yes-all` or `--accept-categories`, otherwise bekas exits with code `2`.
+
+A ready-made `ci-runner` profile (no quarantine, `safe` threshold) is part of the default config:
+
+```bash
+bekas --profile ci-runner clean --apply --yes-all --non-interactive
+```
+
+## Exit codes
+
+| Code | Meaning |
+|---|---|
+| 0 | Success |
+| 1 | Invalid plan signature / aborted / generic failure |
+| 2 | Invalid flag combination |
+| 3 | Another `bekas clean --apply` is already running |

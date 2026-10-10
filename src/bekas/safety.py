@@ -116,6 +116,15 @@ def _expand_exclusions() -> list[Path]:
             excl.append(home / name)
     except RuntimeError:
         pass
+    # bekas's own data directory (quarantine, undo DB, lock, audit log) must
+    # never be rediscovered as a cleaning candidate, otherwise quarantined
+    # items could be permanently deleted and could no longer be restored.
+    try:
+        from bekas.config import _data_dir
+
+        excl.append(_data_dir().resolve())
+    except (OSError, ValueError, RuntimeError):
+        pass
     return excl
 
 
