@@ -1,0 +1,28 @@
+---
+title: Troubleshooting
+description: Fixes for common problems, including the "another bekas process is running" error.
+---
+
+## Another bekas process is running
+
+```
+Another bekas process is running (PID 1234). Exiting.
+```
+
+Only `bekas clean --apply` takes the lock (exit code 3). The lock is a kernel file lock released automatically when the process exits, even after a crash, so a leftover `bekas.lock` file never blocks you in current versions.
+
+1. Check whether a real process exists: `ps -p 1234` (or Task Manager on Windows). If so, wait for it or stop it.
+2. Make sure you run the latest version: `pip install -U bekas`. Older releases decided "already running" from the PID stored in the file, which could be wrong after a crash or PID reuse.
+3. As a last resort, delete `bekas.lock` from the [data directory](/reference/files/) while no bekas process is running.
+
+## Docker checks fail in `bekas doctor`
+
+A warning like *Docker CLI found but 'docker version' failed* means the daemon is not running. Start Docker, or ignore it — Docker plugins are skipped.
+
+## `undo` did not restore everything
+
+Only quarantined items can be restored. `undo` prints how many items were deleted permanently (plugins without quarantine support, or `quarantine_enabled: false`).
+
+## Nothing found
+
+Check `bekas plugins list` (is the plugin enabled and available?) and `bekas doctor`. Recently modified files (`min_quiet_hours`) and the exclusion rules may also hide candidates.

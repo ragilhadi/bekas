@@ -1,0 +1,38 @@
+---
+title: Plugins
+description: All 29 built-in plugins and what they find.
+---
+
+| Plugin | Finds | Needs |
+|---|---|---|
+| `docker.images` | Dangling & unused images | docker |
+| `docker.containers` | Stopped containers | docker |
+| `docker.buildx.cache` | Stale BuildKit cache | docker |
+| `python.venvs` | Orphaned virtual environments | — |
+| `python.cache` | `__pycache__`, `.pytest_cache`, `.mypy_cache`, `.ruff_cache` | — |
+| `pip.cache` | pip download & wheel cache | — |
+| `uv.cache` | uv cache | — |
+| `poetry.cache` | Poetry cache | — |
+| `node.modules` | Old `node_modules` | — |
+| `pnpm.store` | pnpm global store | — |
+| `yarn.cache` | Yarn global cache | — |
+| `rust.target` | Old `target/` dirs | — |
+| `cargo.registry` | Cargo registry cache | — |
+| `go.modcache` | Go module cache | — |
+| `gradle.caches` | Gradle caches | — |
+| `maven.repo` | Old Maven artifact versions (keeps latest 2) | — |
+| `git.branches` | Fully-merged local branches | git |
+| `downloads` | Old files in `~/Downloads` | — |
+| `screenshots` | Old screenshots | — |
+| `system.tmp` | Old temp files you own | — |
+| `system.trash` | Trash / Recycle Bin | — |
+| `dotfiles.backups` | `.zshrc.bak`-style backups | — |
+| `xcode.derived_data` | Xcode DerivedData (macOS) | xcrun |
+| `xcode.simulators` | Abandoned simulators (macOS) | xcrun |
+| `browser.chrome` | Chrome/Chromium caches | — |
+| `browser.firefox` | Firefox caches | — |
+| `browser.safari` | Safari caches (macOS) | — |
+| `vscode.extensions.orphan` | VS Code extensions missing from `extensions.json` | — |
+| `jetbrains.caches` | Caches of older JetBrains IDEs | — |
+
+Run `bekas plugins list` to see availability, whether each is enabled, and whether it supports quarantine on your machine.

@@ -120,6 +120,8 @@ def _check_undo_db() -> CheckResult:
         cursor = conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
         tables = {row[0] for row in cursor.fetchall()}
         conn.close()
+        if not tables:
+            return CheckResult("undo_db", "pass", "Undo DB not created yet (created on first clean)", str(db_path))
         required = {"runs", "quarantine"}
         missing = required - tables
         if missing:
@@ -145,7 +147,11 @@ def _check_docker() -> CheckResult:
         )
         if result.returncode == 0:
             return CheckResult("docker", "pass", "Docker CLI available")
-        return CheckResult("docker", "fail", "Docker CLI found but 'docker version' failed")
+        return CheckResult(
+            "docker",
+            "warn",
+            "Docker CLI found but 'docker version' failed (is the daemon running? Docker plugins will be skipped)",
+        )
     except FileNotFoundError:
         return CheckResult("docker", "fail", "Docker CLI not found (plugin docker.images will be skipped)")
     except subprocess.TimeoutExpired:

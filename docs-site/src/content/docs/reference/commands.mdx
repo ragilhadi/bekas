@@ -1,0 +1,50 @@
+---
+title: Commands
+description: Every bekas command and option.
+---
+
+Global options: `--profile TEXT`, `--json`, `-v/--verbose`.
+
+## bekas audit
+
+`--plugin`, `--serial`, `--sort-by [size|age|tier]`, `--top N`, `--no-cache`, `--rebuild-cache`. Read-only.
+
+## bekas plan
+
+`--safe-only`, `--include-review`, `--json`, `--save PATH`, `--top N`, `--no-cache`.
+
+## bekas clean
+
+`--apply`, `--safe-only`, `--review`, `--yes-all`, `--non-interactive`, `--accept-categories`, `--plan-file`, `--force-stale`. Dry run by default.
+
+## bekas inspect
+
+`bekas inspect <candidate_id>` — full reasoning for one candidate.
+
+## bekas history
+
+`bekas history [RUN_ID] [--since HOURS] [--json]`.
+
+## bekas undo
+
+`bekas undo [RUN_ID]` — restore quarantined items and report items that were permanently deleted.
+
+## bekas quarantine
+
+`list`, `restore <id>`, `purge`.
+
+## bekas plugins
+
+`list`, `enable <name>`, `disable <name>`.
+
+## bekas config
+
+`show [--resolved]`, `validate`.
+
+## bekas doctor
+
+`bekas doctor [--json] [--skip a,b]`. Checks: Python version, config, quarantine writable, undo DB, Docker, Git, plugins, free disk space, quarantine on the same filesystem. A missing or stopped Docker daemon is a warning, not an error. Exit code is non-zero if any check fails.
+
+## bekas tui
+
+Launch the interactive UI.

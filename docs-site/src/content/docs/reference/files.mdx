@@ -1,0 +1,17 @@
+---
+title: Files & Locations
+description: Where bekas stores its config, database, quarantine, logs and lock file.
+---
+
+On Linux (other platforms use their native config/data directories via `platformdirs`):
+
+| What | Path |
+|---|---|
+| Config | `~/.config/bekas/config.yaml` |
+| Data directory | `~/.local/share/bekas/` |
+| Undo log & audit cache (SQLite) | `~/.local/share/bekas/runs.db` |
+| Quarantine | `~/.local/share/bekas/quarantine/` |
+| Event log (JSONL) | `~/.local/share/bekas/events.jsonl` |
+| Single-instance lock | `~/.local/share/bekas/bekas.lock` |
+
+The whole data directory is excluded from audits.

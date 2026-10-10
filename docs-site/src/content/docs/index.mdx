@@ -1,0 +1,51 @@
+---
+title: bekas
+description: One audit. Every kind of forgotten thing. Nothing deleted you cared about.
+template: splash
+hero:
+  tagline: One audit. Every kind of forgotten thing. Nothing deleted you cared about.
+  actions:
+    - text: Get started
+      link: /start-here/quick-start/
+      icon: right-arrow
+    - text: View on GitHub
+      link: https://github.com/ragilhadi/bekas
+      icon: external
+      variant: minimal
+---
+
+import { Card, CardGrid } from '@astrojs/starlight/components';
+
+## Why bekas?
+
+<CardGrid stagger>
+	<Card title="One audit, many plugins" icon="magnifier">
+		29 plugins cover Docker, Python, Node, Rust, Go, Java, browsers, IDEs, Downloads, Screenshots, Trash and more.
+	</Card>
+	<Card title="Read-only by default" icon="seti:lock">
+		<code>audit</code> and <code>plan</code> never touch your files, and <code>clean</code> is a dry run until you pass <code>--apply</code>.
+	</Card>
+	<Card title="Quarantine & undo" icon="rocket">
+		Supported plugins move items to quarantine instead of deleting them. <code>bekas undo</code> restores the last run.
+	</Card>
+	<Card title="Confidence tiers" icon="star">
+		Every candidate is <code>SAFE</code>, <code>REVIEW</code> or <code>MANUAL</code>, so you decide how much risk to take.
+	</Card>
+	<Card title="Signed plans" icon="approve-check">
+		Save a tamper-evident plan with <code>bekas plan --save</code> and apply it later, or in CI.
+	</Card>
+	<Card title="Extensible" icon="puzzle">
+		Plugins are discovered through Python entry points. Write your own by subclassing <code>Plugin</code>.
+	</Card>
+</CardGrid>
+
+## Use it in 30 seconds
+
+```bash
+pipx install bekas
+
+bekas audit                    # what is taking space?
+bekas plan                     # what would clean remove?
+bekas clean --apply --safe-only  # remove only the safest items
+bekas undo                     # changed your mind? restore it
+```

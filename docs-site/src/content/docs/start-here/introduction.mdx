@@ -1,0 +1,22 @@
+---
+title: Introduction
+description: What bekas is and how the audit → plan → clean → undo workflow fits together.
+---
+
+`bekas` is a command-line tool that audits your machine for *forgotten* things — orphaned Docker images, old `node_modules`, stale package-manager caches, ancient downloads and screenshots — and helps you reclaim disk space safely.
+
+## The workflow
+
+| Step | Command | Touches files? |
+|---|---|---|
+| 1. Audit | `bekas audit` | No |
+| 2. Plan | `bekas plan` | No |
+| 3. Clean | `bekas clean --apply` | **Yes** (dry run without `--apply`) |
+| 4. Undo | `bekas undo` | Restores quarantined items |
+
+## Core ideas
+
+- **Plugins** each look for one kind of leftover and report *candidates*.
+- **Confidence tiers** (`SAFE`, `REVIEW`, `MANUAL`) describe how risky each candidate is. See [Safety Model](/guides/safety/).
+- **Quarantine** moves items to a holding folder first, so most removals can be undone.
+- **Undo log** records every run in a local SQLite database.

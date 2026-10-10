@@ -116,7 +116,7 @@ def audit_cmd(
         names = {n.strip() for n in plugins_filter.split(",")}
         all_plugins = [p for p in all_plugins if p.name in names]
 
-    click.echo("Running audit (this may take 30–90 seconds)...")
+    click.echo("Running audit...")
     report = run_audit(
         all_plugins,
         profile_name=profile_name,
@@ -345,6 +345,7 @@ def undo_cmd(ctx: click.Context, run_id: str | None) -> None:
 
     restored = 0
     failed = 0
+    permanent = 0
     try:
         results = json.loads(run["results_json"])
     except Exception:
@@ -354,6 +355,8 @@ def undo_cmd(ctx: click.Context, run_id: str | None) -> None:
     for entry in results:
         undo_token = entry.get("undo_token")
         if not undo_token:
+            if entry.get("success") and entry.get("log") != "dry-run":
+                permanent += 1
             continue
         try:
             restore_from_quarantine(undo_token)
@@ -366,6 +369,8 @@ def undo_cmd(ctx: click.Context, run_id: str | None) -> None:
         click.echo("No quarantined items to restore for this run.")
     else:
         click.echo(f"Restored {restored} item(s). Failed: {failed}.")
+    if permanent:
+        click.echo(f"{permanent} item(s) were deleted permanently (not quarantined) and cannot be restored.")
 
 
 @cli.group("quarantine")
@@ -435,16 +440,30 @@ def plugins_list(ctx: click.Context) -> None:
 
 @plugins_group.command("enable")
 @click.argument("plugin_name")
-def plugins_enable(plugin_name: str) -> None:
-    """Enable a plugin in config (not implemented in v0.1)."""
-    click.echo(f"Enable {plugin_name}: edit {config_path()} to add to enabled_plugins.")
+@click.pass_context
+def plugins_enable(ctx: click.Context, plugin_name: str) -> None:
+    """Enable a plugin in the active profile of the config file."""
+    from bekas.config import set_plugin_enabled
+
+    names = [p.name for p in _get_plugins()]
+    ok, msg = set_plugin_enabled(plugin_name, True, names, ctx.obj.get("profile"))
+    click.echo(msg)
+    if not ok and plugin_name not in names:
+        sys.exit(1)
 
 
 @plugins_group.command("disable")
 @click.argument("plugin_name")
-def plugins_disable(plugin_name: str) -> None:
-    """Disable a plugin in config (not implemented in v0.1)."""
-    click.echo(f"Disable {plugin_name}: edit {config_path()} to remove from enabled_plugins.")
+@click.pass_context
+def plugins_disable(ctx: click.Context, plugin_name: str) -> None:
+    """Disable a plugin in the active profile of the config file."""
+    from bekas.config import set_plugin_enabled
+
+    names = [p.name for p in _get_plugins()]
+    ok, msg = set_plugin_enabled(plugin_name, False, names, ctx.obj.get("profile"))
+    click.echo(msg)
+    if not ok and plugin_name not in names:
+        sys.exit(1)
 
 
 @cli.command("doctor")

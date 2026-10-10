@@ -1,0 +1,33 @@
+---
+title: Safety Model
+description: Confidence tiers, hard exclusions and the other protections that keep bekas from deleting things you care about.
+---
+
+## Confidence tiers
+
+| Tier | Meaning | Example |
+|---|---|---|
+| `SAFE` | Easily recreated or fully reversible | dangling Docker image, `__pycache__` |
+| `REVIEW` | May affect your workflow | old download, browser cache |
+| `MANUAL` | High risk, explicit opt-in | branch on an active project |
+
+## Protections
+
+- **Read-only by default** — `audit` and `plan` never modify anything.
+- **Dry-run by default** — `clean` needs `--apply`.
+- **Hard exclusions** — system directories, `$HOME` itself, sensitive dotfiles, active virtualenvs and `.git` are never touched.
+- **bekas's own data directory** is excluded, so quarantine contents are never cleaned by accident.
+- **Non-local filesystems** (NFS, SMB, FUSE) and **symlinks leaving `$HOME`** are skipped.
+- **Recently modified files** (within `min_quiet_hours`, default 6) are skipped.
+- **Typed confirmation** for high-risk operations.
+- **Signed plans** detect tampering.
+
+The full list of exclusion rules is in [`docs/SAFETY.md`](https://github.com/ragilhadi/bekas/blob/master/docs/SAFETY.md).
+
+## Your own exclusions
+
+```yaml
+exclude:
+  - ~/code/keep-me
+  - "*/important/*"
+```
