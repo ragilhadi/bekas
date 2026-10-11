@@ -145,6 +145,30 @@ def get_run(run_id: str, db_path: Path | None = None) -> dict[str, Any] | None:
     return dict(row)
 
 
+def mark_undo_restored(run_id: str, undo_token: str, db_path: Path | None = None) -> None:
+    """Record that one item of a run has been restored, so undo is idempotent.
+
+    Args:
+        run_id: Run identifier.
+        undo_token: Undo token of the restored item.
+        db_path: Optional custom database path.
+    """
+    conn = _init_db(db_path)
+    try:
+        row = conn.execute("SELECT results_json FROM runs WHERE run_id = ?", (run_id,)).fetchone()
+        if not row:
+            return
+        results = json.loads(row["results_json"])
+        stamp = datetime.now(UTC).isoformat()
+        for entry in results:
+            if entry.get("undo_token") == undo_token and not entry.get("restored_at"):
+                entry["restored_at"] = stamp
+        conn.execute("UPDATE runs SET results_json = ? WHERE run_id = ?", (json.dumps(results), run_id))
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def delete_run(run_id: str, db_path: Path | None = None) -> None:
     """Delete a run record from the database.
 
