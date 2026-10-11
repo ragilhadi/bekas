@@ -10,7 +10,9 @@ exclusion patterns combine to create a multi-layer defense.
 Exclusion layers (checked in order, short-circuit on first match):
 
 1. **Path traversal** — raw string match for ``..`` as a path component.
-2. **Hard system paths** — ``/bin``, ``/usr``, ``/etc``, ``/System``, etc.
+2. **Hard system paths** — ``/bin``, ``/usr``, ``/etc``, ``/System``, etc.,
+   including the system roots themselves (``/``, ``/home``, ``$HOME``) and any
+   path that *contains* a protected location.
 3. **Sensitive globs** — ``.ssh``, ``.gnupg``, ``.aws``, ``*.key``, etc.
 4. **Symlink outside $HOME** — symlinks that escape the home directory.
 5. **Non-local filesystem** — NFS, SMB, FUSE mounts (via ``psutil``).
@@ -23,11 +25,13 @@ See ``docs/SAFETY.md`` for the full documented exclusion list and rationale.
 
 from __future__ import annotations
 
+import contextlib
 import fnmatch
 import os
 import re
+import sys
 from datetime import UTC, datetime, timedelta
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from bekas.models import Candidate
 
@@ -35,6 +39,11 @@ from bekas.models import Candidate
 _HARD_EXCLUSIONS: list[str] = [
     "/bin",
     "/sbin",
+    "/usr",
+    "/lib",
+    "/lib32",
+    "/lib64",
+    "/libx32",
     "/usr/bin",
     "/usr/sbin",
     "/etc",
@@ -58,6 +67,22 @@ _HARD_EXCLUSIONS: list[str] = [
     r"C:\Users\All Users",
     r"C:\Users\Default",
     r"C:\Users\Public",
+]
+
+# Paths that are protected only as themselves: their children are legitimate
+# cleaning targets (``/tmp/x``, ``/home/me/.cache``), but the directory as a
+# whole must never be a candidate. ``$HOME`` is added at runtime.
+_PROTECTED_EXACT: list[str] = [
+    "/",
+    "/home",
+    "/Users",
+    "/root",
+    "/opt",
+    "/srv",
+    "/mnt",
+    "/media",
+    "/tmp",
+    "/var/tmp",
 ]
 
 _SENSITIVE_GLOBS: list[str] = [
@@ -126,6 +151,23 @@ def _expand_exclusions() -> list[Path]:
     except (OSError, ValueError, RuntimeError):
         pass
     return excl
+
+
+def _expand_exact_exclusions() -> list[Path]:
+    """Build the list of paths protected only as themselves (not their children).
+
+    Returns:
+        Resolved paths that must never be a candidate, including ``$HOME``.
+    """
+    exact: list[Path] = []
+    for p in _PROTECTED_EXACT:
+        try:
+            exact.append(Path(p).resolve())
+        except (OSError, ValueError):
+            continue
+    with contextlib.suppress(OSError, RuntimeError):
+        exact.append(Path.home().resolve())
+    return exact
 
 
 def _is_ancestor(ancestor: Path, child: Path) -> bool:
@@ -278,8 +320,86 @@ def _sensitive_glob_match(raw: str, resolved: Path) -> str | None:
     return None
 
 
+def _glob_to_regex(pattern: str) -> re.Pattern[str]:
+    """Translate a gitignore-style glob into a compiled regular expression.
+
+    ``*`` and ``?`` never cross a ``/``; ``**`` does. A pattern with no ``/``
+    (``node_modules``, ``*.bak``) or a relative one (``foo/bar``) may match at
+    any depth; an absolute pattern is anchored at the filesystem root.
+
+    Args:
+        pattern: Glob using ``/`` separators.
+
+    Returns:
+        Compiled expression to be used with ``fullmatch``.
+    """
+    pat = pattern.rstrip("/") or "/"
+    out: list[str] = []
+    if not pat.startswith("/") and not re.match(r"^[A-Za-z]:/", pat):
+        out.append("(?:.*/)?")
+    i = 0
+    while i < len(pat):
+        ch = pat[i]
+        if pat.startswith("**/", i):
+            out.append("(?:.*/)?")
+            i += 3
+        elif pat.startswith("**", i):
+            out.append(".*")
+            i += 2
+        elif ch == "*":
+            out.append("[^/]*")
+            i += 1
+        elif ch == "?":
+            out.append("[^/]")
+            i += 1
+        elif ch == "[" and (end := pat.find("]", i + 2)) != -1:
+            body = pat[i + 1 : end]
+            if body.startswith("!"):
+                body = "^" + body[1:]
+            out.append("[" + body.replace("\\", "\\\\") + "]")
+            i = end + 1
+        else:
+            out.append(re.escape(ch))
+            i += 1
+    return re.compile("".join(out), re.IGNORECASE if sys.platform == "win32" else 0)
+
+
+def _normalise_user_pattern(raw_pat: str) -> str:
+    """Expand a leading ``~`` and normalise separators of a user pattern.
+
+    Args:
+        raw_pat: Pattern exactly as written in the config.
+
+    Returns:
+        Pattern with ``/`` separators and ``~`` expanded only at the start.
+    """
+    pat = raw_pat.strip()
+    if sys.platform == "win32":
+        pat = pat.replace("\\", "/")
+    if pat == "~" or pat.startswith(("~/", "~\\")):
+        pat = Path.home().as_posix() + pat[1:].replace("\\", "/")
+    return pat
+
+
+def _path_and_ancestors(target: str) -> list[str]:
+    """Return a posix path followed by each of its parents.
+
+    Args:
+        target: Posix-style path string.
+
+    Returns:
+        ``[target, parent, grandparent, ...]``.
+    """
+    pp = PurePosixPath(target)
+    return [str(pp), *(str(a) for a in pp.parents)]
+
+
 def _user_exclusion_match(raw: str, resolved: Path, user_exclusions: list[str]) -> str | None:
     """Return the first user exclusion pattern matching the path, if any.
+
+    Patterns follow gitignore-style rules (see :func:`_glob_to_regex`). A match
+    on the path or on any of its parent directories excludes it, so excluding
+    a directory also excludes everything inside.
 
     Args:
         raw: The path string as originally supplied.
@@ -289,92 +409,24 @@ def _user_exclusion_match(raw: str, resolved: Path, user_exclusions: list[str]) 
     Returns:
         The matching pattern as the user wrote it, or None.
     """
-    home = str(Path.home())
-    targets = _glob_targets(raw, resolved)
+    targets = [c for t in _glob_targets(raw, resolved) for c in _path_and_ancestors(t)]
     for raw_pat in user_exclusions:
-        pat = raw_pat.replace("~/", home + "/")
-        # Support simple **/ glob
-        if "**" in pat:
-            parts = pat.replace("**", "").strip("/").split("/")
-            # crude containment match
-            if all(any(part in t for t in targets) for part in parts if part):
-                return raw_pat
-        else:
-            for t in targets:
-                if fnmatch.fnmatch(t, pat) or fnmatch.fnmatch(t, pat + "/*"):
-                    return raw_pat
-        # Exact directory match
-        try:
-            rp = Path(pat).resolve()
-            if resolved == rp or _is_ancestor(rp, resolved):
-                return raw_pat
-        except (OSError, ValueError):
+        pat = _normalise_user_pattern(raw_pat)
+        if not pat:
             continue
+        regex = _glob_to_regex(pat)
+        if any(regex.fullmatch(t) for t in targets):
+            return raw_pat
+        # Plain paths are also compared after resolving, so a pattern naming a
+        # symlinked directory still excludes what lives behind it.
+        if not any(c in pat for c in "*?["):
+            try:
+                rp = Path(pat).resolve()
+                if resolved == rp or _is_ancestor(rp, resolved):
+                    return raw_pat
+            except (OSError, ValueError):
+                continue
     return None
-
-
-def is_excluded(
-    path: Path | str,
-    user_exclusions: list[str] | None = None,
-    min_quiet_hours: int = 0,
-) -> bool:
-    """Determine whether a path must never be touched.
-
-    Checks traversal patterns, hard system exclusions, sensitive globs,
-    symlink safety, filesystem locality, modification recency, active
-    virtual environments, and user-defined exclusion patterns.
-
-    Args:
-        path: Filesystem path or string to evaluate.
-        user_exclusions: Optional list of user-defined exclusion patterns.
-        min_quiet_hours: Minimum hours since last modification. Defaults
-            to 6.
-
-    Returns:
-        True if the path is excluded, False otherwise.
-    """
-    raw_str = str(path)
-
-    # Path traversal guard: check BEFORE resolving, on the raw path string.
-    if _TRAVERSAL_RE.search(raw_str):
-        return True
-
-    # Resolve the path, treating resolution errors as excluded for safety.
-    try:
-        resolved = Path(path).resolve()
-    except (OSError, ValueError, RuntimeError):
-        return True
-
-    # Hard system exclusions (resolved and checked canonically)
-    for ex in _expand_exclusions():
-        try:
-            if resolved == ex or _is_ancestor(ex, resolved):
-                return True
-        except (OSError, ValueError, RuntimeError):
-            return True
-
-    # Sensitive globs (checked against both raw and resolved forms)
-    if _sensitive_glob_match(raw_str, resolved) is not None:
-        return True
-
-    # Symlink pointing outside home
-    if _is_symlink_outside_home(resolved):
-        return True
-
-    # Non-local filesystem
-    if _is_non_local_filesystem(resolved):
-        return True
-
-    # Recently modified
-    if _is_too_recent(resolved, min_quiet_hours):
-        return True
-
-    # Active virtual environment
-    if _is_inside_active_venv(resolved):
-        return True
-
-    # User-defined exclusions
-    return bool(user_exclusions) and _user_exclusion_match(raw_str, resolved, user_exclusions or []) is not None
 
 
 def is_safe_to_delete(
@@ -392,7 +444,7 @@ def is_safe_to_delete(
         path: Filesystem path or string to evaluate.
         user_exclusions: Optional list of user-defined exclusion patterns.
         min_quiet_hours: Minimum hours since last modification. Defaults
-            to 6.
+            to 0 (no recency check).
 
     Returns:
         Tuple of ``(is_safe, reason)``. ``is_safe`` is True when the path
@@ -414,14 +466,22 @@ def is_safe_to_delete(
         try:
             if resolved == ex or _is_ancestor(ex, resolved):
                 return (False, f"hard-excluded system path: {ex}")
+            if _is_ancestor(resolved, ex):
+                return (False, f"contains protected path: {ex}")
         except (OSError, ValueError, RuntimeError):
             return (False, "error checking system exclusions")
+
+    for ex in _expand_exact_exclusions():
+        if resolved == ex:
+            return (False, f"protected location: {ex}")
 
     sensitive = _sensitive_glob_match(raw_str, resolved)
     if sensitive is not None:
         return (False, f"sensitive glob match: {sensitive}")
 
-    if _is_symlink_outside_home(resolved):
+    # Must look at the path as supplied: ``resolved`` has already followed any
+    # symlink, so it can never be reported as one.
+    if _is_symlink_outside_home(Path(path)):
         return (False, "symlink points outside home directory")
 
     if _is_non_local_filesystem(resolved):
@@ -441,6 +501,27 @@ def is_safe_to_delete(
     return (True, "")
 
 
+def is_excluded(
+    path: Path | str,
+    user_exclusions: list[str] | None = None,
+    min_quiet_hours: int = 0,
+) -> bool:
+    """Determine whether a path must never be touched.
+
+    Thin wrapper over :func:`is_safe_to_delete`, so both APIs always agree.
+
+    Args:
+        path: Filesystem path or string to evaluate.
+        user_exclusions: Optional list of user-defined exclusion patterns.
+        min_quiet_hours: Minimum hours since last modification. Defaults
+            to 0 (no recency check).
+
+    Returns:
+        True if the path is excluded, False otherwise.
+    """
+    return not is_safe_to_delete(path, user_exclusions, min_quiet_hours)[0]
+
+
 def filter_candidates(
     candidates: list[Candidate],
     user_exclusions: list[str] | None = None,
@@ -452,7 +533,7 @@ def filter_candidates(
         candidates: List of candidates to filter.
         user_exclusions: Optional user-defined exclusion patterns.
         min_quiet_hours: Minimum hours since last modification. Defaults
-            to 6.
+            to 0 (no recency check).
 
     Returns:
         Candidates whose paths are not excluded.

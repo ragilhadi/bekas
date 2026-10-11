@@ -9,7 +9,7 @@ description: Fixes for common problems, including the "another bekas process is 
 Another bekas process is running (PID 1234). Exiting.
 ```
 
-Only `bekas clean --apply` takes the lock (exit code 3). The lock is a kernel file lock released automatically when the process exits, even after a crash, so a leftover `bekas.lock` file never blocks you in current versions.
+`bekas clean --apply`, `bekas undo`, `bekas quarantine restore` and `bekas quarantine purge` take the lock, so they never run at the same time as each other (exit code 3 if it is held). Read-only commands such as `quarantine list` do not. The lock is a kernel file lock released automatically when the process exits, even after a crash, so a leftover `bekas.lock` file never blocks you in current versions.
 
 1. Check whether a real process exists: `ps -p 1234` (or Task Manager on Windows). If so, wait for it or stop it.
 2. Make sure you run the latest version: `pip install -U bekas`. Older releases decided "already running" from the PID stored in the file, which could be wrong after a crash or PID reuse.

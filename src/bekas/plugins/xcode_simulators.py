@@ -160,10 +160,7 @@ def _list_unavailable_runtimes() -> list[dict]:
         for runtime in data.get("runtimes", []):
             availability = runtime.get("availability", "").lower()
             bundle_path = runtime.get("bundlePath", "")
-            is_unavailable = (
-                availability == "unavailable"
-                or (bundle_path and not _path_exists(bundle_path))
-            )
+            is_unavailable = availability == "unavailable" or (bundle_path and not _path_exists(bundle_path))
             if is_unavailable:
                 runtimes.append(runtime)
         return runtimes
@@ -181,6 +178,7 @@ def _path_exists(path_str: str) -> bool:
         True if the path exists.
     """
     from pathlib import Path
+
     return Path(path_str).exists()
 
 

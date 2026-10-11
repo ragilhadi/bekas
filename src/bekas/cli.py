@@ -2,14 +2,19 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import sys
+from collections.abc import Iterator
+from datetime import UTC, datetime
+from pathlib import Path
 
 import click
 
-from bekas.clean import CleanAborted, apply_plan
+from bekas.clean import CleanAborted, apply_plan, fingerprint_plan
 from bekas.config import (
     config_path,
+    data_dir,
     ensure_config,
     is_plugin_enabled,
     load_config,
@@ -20,12 +25,29 @@ from bekas.config import (
 from bekas.database import get_run, list_quarantine, list_runs
 from bekas.events import read_events
 from bekas.formatters import format_human, format_json
-from bekas.locking import AlreadyRunningError
+from bekas.locking import AlreadyRunningError, ProcessLock
 from bekas.models import AuditReport, Confidence, Context, Plan
 from bekas.plugin import Plugin, discover_plugins
-from bekas.quarantine import purge_old_quarantine, restore_from_quarantine
+from bekas.quarantine import purge_old_quarantine, restore_from_quarantine, undo_run_results
 from bekas.runner import run_audit
 from bekas.signing import sign_plan, verify_plan
+
+
+@contextlib.contextmanager
+def _exclusive() -> Iterator[None]:
+    """Hold the single-instance lock around a mutating command.
+
+    Exits with status 3 (like ``clean``) when another bekas process holds it.
+
+    Yields:
+        Nothing; the lock is released when the block exits.
+    """
+    try:
+        with ProcessLock():
+            yield
+    except AlreadyRunningError as exc:
+        click.echo(str(exc))
+        sys.exit(3)
 
 
 def _get_plugins() -> list[Plugin]:
@@ -35,6 +57,60 @@ def _get_plugins() -> list[Plugin]:
         List of plugin instances.
     """
     return discover_plugins()
+
+
+def _check_tier_flags(safe_only: bool, include_review: bool) -> None:
+    """Reject contradictory tier flags.
+
+    Args:
+        safe_only: Whether ``--safe-only`` was given.
+        include_review: Whether ``--review`` / ``--include-review`` was given.
+
+    Raises:
+        click.UsageError: If both were given.
+    """
+    if safe_only and include_review:
+        raise click.UsageError("--safe-only cannot be combined with --review / --include-review.")
+
+
+def _stdin_is_tty() -> bool:
+    """Return True if standard input is an interactive terminal.
+
+    Returns:
+        Whether prompts can be shown.
+    """
+    return sys.stdin.isatty()
+
+
+def _welcome_marker() -> Path:
+    """Return the file recording that the first-run welcome has been handled.
+
+    Returns:
+        Path inside the bekas data directory.
+    """
+    return data_dir() / "welcomed"
+
+
+def _is_first_run() -> bool:
+    """Return True if this looks like the user's first use of bekas.
+
+    Returns:
+        True when no command has been run before and no clean has ever been recorded.
+    """
+    try:
+        return not _welcome_marker().exists() and not list_runs()
+    except OSError:
+        return False
+
+
+def _mark_welcomed() -> None:
+    """Remember that bekas has been used, so the first-run welcome is not repeated."""
+    try:
+        marker = _welcome_marker()
+        if not marker.exists():
+            marker.touch()
+    except OSError:
+        pass
 
 
 def _audit_to_plan(report: AuditReport, safe_only: bool = False, include_review: bool = False) -> Plan:
@@ -50,7 +126,7 @@ def _audit_to_plan(report: AuditReport, safe_only: bool = False, include_review:
         Plan containing the filtered candidates.
     """
     allowed = {Confidence.SAFE}
-    if include_review:
+    if include_review and not safe_only:
         allowed.add(Confidence.REVIEW)
     candidates = [c for pr in report.plugins for c in pr.candidates if c.confidence in allowed]
     return Plan(audit_id=report.audit_id, candidates=candidates)
@@ -68,34 +144,47 @@ def cli(ctx: click.Context, profile: str | None, json_output: bool, verbose: boo
     ctx.obj["json"] = json_output
     ctx.obj["verbose"] = verbose
 
-    if ctx.invoked_subcommand is None:
-        # First-run welcome
-        click.echo("Welcome to bekas.")
-        click.echo("")
-        click.echo(
-            "bekas finds leftover stuff on your machine — Docker images you forgot, "
-            "Python venvs from old projects, old downloads, etc. — and helps you "
-            "reclaim disk space safely."
-        )
-        click.echo("")
-        if sys.stdin.isatty():
-            resp = click.prompt("You haven't run an audit yet. Try one now?", default="Y")
-            if resp.strip().lower() in ("y", "yes"):
-                ctx.invoke(audit_cmd)
-            else:
-                click.echo("\nNext steps:")
-                click.echo("  bekas audit       Run an audit")
-                click.echo("  bekas plan        See what would be removed")
-                click.echo("  bekas clean       Auto-clean safe items")
+    if ctx.invoked_subcommand is not None:
+        _mark_welcomed()
+        return
+
+    if not _is_first_run():
+        click.echo(ctx.get_help())
+        return
+
+    # First-run welcome
+    click.echo("Welcome to bekas.")
+    click.echo("")
+    click.echo(
+        "bekas finds leftover stuff on your machine — Docker images you forgot, "
+        "Python venvs from old projects, old downloads, etc. — and helps you "
+        "reclaim disk space safely."
+    )
+    click.echo("")
+    if _stdin_is_tty():
+        _mark_welcomed()
+        resp = click.prompt("You haven't run an audit yet. Try one now?", default="Y")
+        if resp.strip().lower() in ("y", "yes"):
+            ctx.invoke(audit_cmd)
         else:
-            click.echo("Run 'bekas audit' to get started.")
+            click.echo("\nNext steps:")
+            click.echo("  bekas audit       Run an audit")
+            click.echo("  bekas plan        See what would be removed")
+            click.echo("  bekas clean       Auto-clean safe items")
+    else:
+        click.echo("Run 'bekas audit' to get started.")
 
 
 @cli.command("audit")
 @click.option("--plugin", "plugins_filter", default=None, help="Comma-separated plugin names.")
 @click.option("--serial", is_flag=True, help="Run plugins serially.")
 @click.option("--sort-by", type=click.Choice(["size", "age", "tier"]), default=None, help="Sort candidates by key.")
-@click.option("--top", type=int, default=None, help="Only show top N candidates per plugin.")
+@click.option(
+    "--top",
+    type=click.IntRange(min=1),
+    default=None,
+    help="List at most N candidates per plugin (totals are unaffected).",
+)
 @click.option("--no-cache", is_flag=True, help="Bypass the audit cache.")
 @click.option("--rebuild-cache", is_flag=True, help="Clear and rebuild the audit cache.")
 @click.pass_context
@@ -135,11 +224,18 @@ def audit_cmd(
 
 
 @cli.command("plan")
-@click.option("--safe-only", is_flag=True, help="Only include safe-tier items.")
-@click.option("--include-review", is_flag=True, help="Include review-tier items.")
+@click.option(
+    "--safe-only", is_flag=True, help="Only SAFE-tier items (the default; errors if combined with --include-review)."
+)
+@click.option("--include-review", is_flag=True, help="Also include REVIEW-tier items.")
 @click.option("--json", "json_output", is_flag=True, help="Output JSON.")
 @click.option("--save", type=click.Path(), default=None, help="Save signed plan to a file.")
-@click.option("--top", type=int, default=None, help="Only show top N candidates.")
+@click.option(
+    "--top",
+    type=click.IntRange(min=1),
+    default=None,
+    help="List at most N candidates per category (totals are unaffected).",
+)
 @click.option("--no-cache", is_flag=True, help="Bypass the audit cache.")
 @click.pass_context
 def plan_cmd(
@@ -151,13 +247,18 @@ def plan_cmd(
     top: int | None,
     no_cache: bool,
 ) -> None:
-    """Preview what clean would do."""
+    """Run a fresh audit and preview what clean would do."""
+    _check_tier_flags(safe_only, include_review)
     profile_name = ctx.obj.get("profile")
     all_plugins = _get_plugins()
     report = run_audit(all_plugins, profile_name=profile_name, no_cache=no_cache)
     plan = _audit_to_plan(report, safe_only=safe_only, include_review=include_review)
 
     if save:
+        # Record what each candidate looks like now, so `clean --plan-file` can
+        # refuse items that changed since. Both fields are covered by the signature.
+        plan.fingerprints = fingerprint_plan(plan)
+        plan.signed_at = datetime.now(UTC)
         plan_data = plan.model_dump(mode="json")
         plan_data["_signature"] = sign_plan(plan_data)
         with open(save, "w") as f:
@@ -172,15 +273,61 @@ def plan_cmd(
         click.echo(format_human(plan, top=top))
 
 
+def _load_plan_file(plan_file: str, allow_unsigned: bool) -> Plan:
+    """Load a saved plan and verify its signature, exiting on any problem.
+
+    Args:
+        plan_file: Path of the plan JSON written by ``plan --save``.
+        allow_unsigned: Accept a plan without ``_signature``. A plan that has a
+            signature is always verified, whatever this flag says.
+
+    Returns:
+        The parsed plan.
+    """
+    try:
+        with open(plan_file) as f:
+            plan_data = json.load(f)
+    except (OSError, ValueError) as exc:
+        click.echo(f"Error: could not read plan file: {exc}")
+        sys.exit(1)
+    if not isinstance(plan_data, dict):
+        click.echo("Error: plan file is not a valid plan.")
+        sys.exit(1)
+
+    signature = plan_data.pop("_signature", None)
+    if signature is None:
+        if not allow_unsigned:
+            click.echo(
+                "Error: plan file has no signature. Re-create it with `bekas plan --save`, "
+                "or pass --allow-unsigned if you wrote it yourself."
+            )
+            sys.exit(1)
+    elif not isinstance(signature, str) or not verify_plan(plan_data, signature):
+        click.echo("Error: plan file signature is invalid or was tampered with.")
+        sys.exit(1)
+
+    try:
+        return Plan(**plan_data)
+    except ValueError as exc:
+        click.echo(f"Error: plan file is not a valid plan: {exc}")
+        sys.exit(1)
+
+
 @cli.command("clean")
 @click.option("--apply", is_flag=True, help="Actually delete (default is dry-run).")
-@click.option("--safe-only", is_flag=True, help="Only clean safe-tier items.")
-@click.option("--review", "include_review", is_flag=True, help="Include review-tier items interactively.")
+@click.option("--safe-only", is_flag=True, help="Only SAFE-tier items (the default; errors if combined with --review).")
+@click.option(
+    "--review",
+    "include_review",
+    is_flag=True,
+    help="Also include REVIEW-tier items. The typed confirmation still applies.",
+)
 @click.option("--yes-all", is_flag=True, help="Skip per-category prompts.")
 @click.option("--non-interactive", is_flag=True, help="Non-interactive mode (requires --accept-categories).")
 @click.option("--accept-categories", default=None, help="Comma-separated categories for non-interactive mode.")
 @click.option("--plan-file", type=click.Path(exists=True), default=None, help="Apply a saved JSON plan file.")
 @click.option("--force-stale", is_flag=True, help="Apply a plan even if candidates have drifted.")
+@click.option("--allow-unsigned", is_flag=True, help="Accept a --plan-file that carries no signature.")
 @click.pass_context
 def clean_cmd(
     ctx: click.Context,
@@ -192,8 +339,10 @@ def clean_cmd(
     accept_categories: str | None,
     plan_file: str | None,
     force_stale: bool,
+    allow_unsigned: bool,
 ) -> None:
     """Remove approved candidates. Dry-run by default."""
+    _check_tier_flags(safe_only, include_review)
     profile_name = ctx.obj.get("profile")
     profile = profile_for(profile_name)
 
@@ -203,13 +352,7 @@ def clean_cmd(
         sys.exit(2)
 
     if plan_file:
-        with open(plan_file) as f:
-            plan_data = json.load(f)
-        signature = plan_data.pop("_signature", None)
-        if signature and not verify_plan(plan_data, signature):
-            click.echo("Error: plan file signature is invalid or was tampered with.")
-            sys.exit(1)
-        plan = Plan(**plan_data)
+        plan = _load_plan_file(plan_file, allow_unsigned)
         report = None
     else:
         all_plugins = _get_plugins()
@@ -236,8 +379,6 @@ def clean_cmd(
     quarantine_enabled = profile.quarantine_enabled
 
     # Acquire single-instance lock for mutating commands
-    from bekas.locking import ProcessLock
-
     try:
         with ProcessLock():
             result = apply_plan(
@@ -268,7 +409,7 @@ def clean_cmd(
 @click.argument("candidate_id")
 @click.pass_context
 def inspect_cmd(ctx: click.Context, candidate_id: str) -> None:
-    """Show full reasoning for a single candidate."""
+    """Run a fresh audit and show full reasoning for a single candidate."""
     all_plugins = _get_plugins()
     report = run_audit(all_plugins, profile_name=ctx.obj.get("profile"))
     for pr in report.plugins:
@@ -285,7 +426,7 @@ def inspect_cmd(ctx: click.Context, candidate_id: str) -> None:
                     for k, v in c.metadata.items():
                         click.echo(f"  {k}: {v}")
                 return
-    click.echo(f"Candidate {candidate_id} not found in latest audit.")
+    click.echo(f"Candidate {candidate_id} not found. `inspect` runs a fresh audit; it may no longer exist.")
 
 
 @cli.command("history")
@@ -327,9 +468,6 @@ def history_cmd(ctx: click.Context, run_id: str | None, since: int | None, json_
 @click.pass_context
 def undo_cmd(ctx: click.Context, run_id: str | None) -> None:
     """Undo the last apply or a specific run."""
-    from bekas.database import get_run
-    from bekas.quarantine import restore_from_quarantine
-
     if not run_id:
         runs = list_runs()
         if not runs:
@@ -342,38 +480,32 @@ def undo_cmd(ctx: click.Context, run_id: str | None) -> None:
         click.echo(f"Run {run_id} not found.")
         return
 
-    click.echo(f"Undo run {run_id}...")
-
-    import json
-
-    restored = 0
-    failed = 0
-    permanent = 0
     try:
         results = json.loads(run["results_json"])
     except Exception:
         click.echo("Could not parse run results.")
         return
 
-    for entry in results:
-        undo_token = entry.get("undo_token")
-        if not undo_token:
-            if entry.get("success") and entry.get("log") != "dry-run":
-                permanent += 1
-            continue
-        try:
-            restore_from_quarantine(undo_token)
-            restored += 1
-        except Exception as exc:
-            click.echo(f"  Failed to restore {undo_token}: {exc}")
-            failed += 1
+    click.echo(f"Undo run {run_id}...")
+    with _exclusive():
+        # Re-read under the lock: a concurrent undo may have restored items meanwhile.
+        fresh = get_run(run_id)
+        if fresh:
+            results = json.loads(fresh["results_json"])
+        outcome = undo_run_results(run_id, results)
 
-    if restored == 0 and failed == 0:
+    for token, reason in outcome.failed:
+        click.echo(f"  Failed to restore {token}: {reason}")
+    if outcome.restored == 0 and not outcome.failed and not outcome.already_restored:
         click.echo("No quarantined items to restore for this run.")
     else:
-        click.echo(f"Restored {restored} item(s). Failed: {failed}.")
-    if permanent:
-        click.echo(f"{permanent} item(s) were deleted permanently (not quarantined) and cannot be restored.")
+        click.echo(f"Restored {outcome.restored} item(s). Failed: {len(outcome.failed)}.")
+    if outcome.already_restored:
+        click.echo(f"{outcome.already_restored} item(s) were already restored by an earlier undo.")
+    if outcome.permanent:
+        click.echo(f"{outcome.permanent} item(s) were deleted permanently (not quarantined) and cannot be restored.")
+    if outcome.failed:
+        sys.exit(1)
 
 
 @cli.group("quarantine")
@@ -401,17 +533,20 @@ def quarantine_list() -> None:
 @click.argument("quarantine_id")
 def quarantine_restore(quarantine_id: str) -> None:
     """Restore a quarantined item to its original location."""
-    try:
-        dest = restore_from_quarantine(quarantine_id)
-        click.echo(f"Restored to {dest}")
-    except Exception as exc:
-        click.echo(f"Restore failed: {exc}")
+    with _exclusive():
+        try:
+            dest = restore_from_quarantine(quarantine_id)
+        except Exception as exc:
+            click.echo(f"Restore failed: {exc}")
+            sys.exit(1)
+    click.echo(f"Restored to {dest}")
 
 
 @quarantine_group.command("purge")
 def quarantine_purge() -> None:
     """Empty quarantine immediately."""
-    removed, freed = purge_old_quarantine(retention_days=0)
+    with _exclusive():
+        removed, freed = purge_old_quarantine(retention_days=0)
     click.echo(f"Purged {removed} items, freeing {_human_size(freed)}.")
 
 

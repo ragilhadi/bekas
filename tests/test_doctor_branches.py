@@ -164,7 +164,7 @@ def test_check_git_timeout():
 
 def test_check_plugins_discovery_fails():
     """Plugin discovery raises an exception."""
-    with patch("bekas.doctor.discover_plugins", side_effect=RuntimeError("boom")):
+    with patch("bekas.doctor.load_plugins", side_effect=RuntimeError("boom")):
         result = _check_plugins()
         assert result.status == "fail"
         assert "Plugin discovery failed" in result.message

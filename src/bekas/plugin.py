@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import importlib.metadata as metadata
+import logging
 import platform
 from abc import ABC, abstractmethod
 from collections.abc import Iterator
 from dataclasses import dataclass
 
 from bekas.models import Candidate, Context, RemovalResult
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -170,23 +173,54 @@ class Plugin(ABC):
         return RemovalResult(success=False, bytes_freed=0, log="Plugin does not support undo.")
 
 
+@dataclass(frozen=True)
+class PluginLoadError:
+    """A ``bekas.plugins`` entry point that could not be loaded.
+
+    Attributes:
+        entry_point: Entry point name.
+        error: ``ExceptionType: message`` describing the failure.
+    """
+
+    entry_point: str
+    error: str
+
+
+def load_plugins() -> tuple[list[Plugin], list[PluginLoadError]]:
+    """Load every ``bekas.plugins`` entry point, keeping the failures.
+
+    Returns:
+        ``(plugins, errors)``: the instantiated plugins, and one
+        :class:`PluginLoadError` per entry point that failed to import,
+        instantiate, or that is not a ``Plugin`` subclass.
+    """
+    plugins: list[Plugin] = []
+    errors: list[PluginLoadError] = []
+    for ep in metadata.entry_points(group="bekas.plugins"):
+        try:
+            inst = ep.load()()
+        except Exception as exc:
+            errors.append(PluginLoadError(ep.name, f"{type(exc).__name__}: {exc}"))
+            continue
+        if isinstance(inst, Plugin):
+            plugins.append(inst)
+        else:
+            errors.append(PluginLoadError(ep.name, "entry point is not a bekas Plugin"))
+    return plugins, errors
+
+
 def discover_plugins() -> list[Plugin]:
     """Discover plugins via entry points.
 
     Scans the ``bekas.plugins`` entry point group and instantiates
-    each discovered class if it is a ``Plugin`` subclass.
+    each discovered class if it is a ``Plugin`` subclass. Entry points that
+    fail to load are skipped; use :func:`load_plugins` or ``bekas doctor`` to
+    see why.
 
     Returns:
         List of instantiated plugin objects.
     """
-    plugins: list[Plugin] = []
-    for ep in metadata.entry_points(group="bekas.plugins"):
-        try:
-            cls = ep.load()
-            inst = cls()
-            if isinstance(inst, Plugin):
-                plugins.append(inst)
-        except Exception:
-            # Silently skip broken plugins; could log in future
-            pass
+    plugins, errors = load_plugins()
+    for err in errors:
+        logger.debug("plugin %s failed to load: %s", err.entry_point, err.error)
     return plugins

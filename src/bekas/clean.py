@@ -7,13 +7,14 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from bekas.config import profile_for, quarantine_dir
+from bekas.config import load_config, profile_for, quarantine_dir
 from bekas.database import log_run
 from bekas.events import Event, log_event
+from bekas.fsmeasure import measure_path as _measure_path
 from bekas.models import AuditReport, Candidate, Confidence, Context, Plan, RemovalResult, RunResult
 from bekas.plugin import Plugin
 from bekas.quarantine import move_to_quarantine, purge_old_quarantine
-from bekas.safety import is_excluded
+from bekas.safety import is_safe_to_delete
 
 
 class CleanAborted(Exception):  # noqa: N818
@@ -101,6 +102,51 @@ def _human_size(size_bytes: int) -> str:
     return f"{size:.1f} PB"
 
 
+# Candidates whose ``path_or_handle`` is a container for the real target (a git
+# branch lives in a repository, which changes with every commit), so the path
+# says nothing about whether the candidate itself changed.
+_NO_FINGERPRINT_CATEGORIES = frozenset({"git.branch"})
+
+
+def fingerprint_candidate(candidate: Candidate) -> dict[str, object]:
+    """Capture a freshness fingerprint for a path-based candidate.
+
+    Args:
+        candidate: Candidate to fingerprint.
+
+    Returns:
+        ``{"exists", "size_bytes", "mtime"}``, or an empty dict when the candidate
+        has no meaningful path (opaque handles, git branches, missing paths).
+    """
+    if not _is_filesystem_path(candidate.path_or_handle) or candidate.category in _NO_FINGERPRINT_CATEGORIES:
+        return {}
+    path = Path(candidate.path_or_handle)
+    try:
+        if not path.exists():
+            return {}
+        size, mtime = _measure_path(path)
+    except OSError:
+        return {}
+    return {"exists": True, "size_bytes": size, "mtime": mtime}
+
+
+def fingerprint_plan(plan: Plan) -> dict[str, dict[str, object]]:
+    """Fingerprint every candidate of a plan that can be fingerprinted.
+
+    Args:
+        plan: Plan whose candidates should be fingerprinted.
+
+    Returns:
+        Mapping from candidate id to fingerprint (candidates without one are omitted).
+    """
+    out: dict[str, dict[str, object]] = {}
+    for c in plan.candidates:
+        fp = fingerprint_candidate(c)
+        if fp:
+            out[c.id] = fp
+    return out
+
+
 def validate_plan_freshness(plan: Plan, force_stale: bool = False) -> tuple[list[Candidate], list[str]]:
     """Re-stat each candidate in a plan and abort or warn on drift.
 
@@ -126,6 +172,12 @@ def validate_plan_freshness(plan: Plan, force_stale: bool = False) -> tuple[list
         skipped.append(f"Plan signed on {plan.signed_at.isoformat()} (>7 days old)")
 
     for c in plan.candidates:
+        # Opaque handles (docker://...) have no path to re-stat; the owning
+        # plugin validates them when it removes them.
+        if not _is_filesystem_path(c.path_or_handle):
+            valid.append(c)
+            continue
+
         path = Path(c.path_or_handle)
         fp = plan.fingerprints.get(c.id, {})
 
@@ -134,9 +186,7 @@ def validate_plan_freshness(plan: Plan, force_stale: bool = False) -> tuple[list
             continue
 
         try:
-            stat = path.stat()
-            current_size = stat.st_size if path.is_file() else c.size_bytes
-            current_mtime = int(stat.st_mtime)
+            current_size, current_mtime = _measure_path(path)
         except (OSError, ValueError):
             continue
 
@@ -276,11 +326,10 @@ def apply_plan(
     retention = profile_dict.get("quarantine_retention_days", 30)
 
     # Re-validate plan freshness
-    if plan.fingerprints:
+    if plan.fingerprints or plan.signed_at is not None:
         valid, skipped = validate_plan_freshness(plan, force_stale=force_stale)
-        if skipped and ctx.verbose:
-            for reason in skipped:
-                print(f"  [plan validation] {reason}")
+        for reason in skipped:
+            print(f"  [plan validation] {reason}")
         plan.candidates = valid
 
     if not plan.candidates:
@@ -312,9 +361,18 @@ def apply_plan(
     total_freed = 0
     run_id = f"run_{uuid.uuid4().hex[:8]}"
 
+    # Re-apply the full safety policy at apply time: the config may have gained
+    # exclusions since the plan was created, and files may have been touched.
+    user_exclusions = load_config().exclude
+    min_quiet_hours = profile.min_quiet_hours
+
     for items in groups.values():
         for c in items:
-            if is_excluded(c.path_or_handle):
+            safe, reason = is_safe_to_delete(c.path_or_handle, user_exclusions, min_quiet_hours)
+            if not safe:
+                per_candidate.append(
+                    (c, RemovalResult(success=False, bytes_freed=0, log=f"skipped by safety rules: {reason}"))
+                )
                 continue
             plugin = _find_plugin(plugins, c.category)
             removal_result: RemovalResult
