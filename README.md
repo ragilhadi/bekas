@@ -119,7 +119,9 @@ Options:
 - `--yes-all` — Skip all interactive prompts.
 - `--non-interactive` — Requires `--accept-categories`.
 - `--accept-categories` — Comma-separated category whitelist for non-interactive runs.
-- `--plan-file` — Apply a previously saved signed plan instead of re-auditing.
+- `--plan-file` — Apply a previously saved signed plan instead of re-auditing. Unsigned or tampered files are refused; candidates that changed since the plan was saved are skipped.
+- `--force-stale` — Apply candidates even if they changed since the plan was saved.
+- `--allow-unsigned` — Accept a plan file that has no signature (a signed file is always verified).
 
 ### `bekas inspect <id>`
 

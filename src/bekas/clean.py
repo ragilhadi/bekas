@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import secrets
 import uuid
 from datetime import UTC, datetime, timedelta
@@ -101,6 +102,110 @@ def _human_size(size_bytes: int) -> str:
     return f"{size:.1f} PB"
 
 
+# Candidates whose ``path_or_handle`` is a container for the real target (a git
+# branch lives in a repository, which changes with every commit), so the path
+# says nothing about whether the candidate itself changed.
+_NO_FINGERPRINT_CATEGORIES = frozenset({"git.branch"})
+
+# Upper bound on directory entries visited when measuring a candidate. Keeps
+# ``plan --save`` and ``clean`` fast on enormous trees; the result stays
+# deterministic for an unchanged tree.
+_MAX_FINGERPRINT_ENTRIES = 50_000
+
+
+def _measure_tree(root: Path) -> tuple[int, int]:
+    """Measure a directory cheaply without following symlinks.
+
+    Args:
+        root: Directory to measure.
+
+    Returns:
+        ``(total_file_bytes, newest_mtime)`` over the directory and its entries.
+    """
+    total = 0
+    newest = int(root.stat().st_mtime)
+    visited = 0
+    stack = [str(root)]
+    while stack:
+        try:
+            it = os.scandir(stack.pop())
+        except OSError:
+            continue
+        with it:
+            for entry in it:
+                visited += 1
+                if visited > _MAX_FINGERPRINT_ENTRIES:
+                    return total, newest
+                try:
+                    st = entry.stat(follow_symlinks=False)
+                    is_dir = entry.is_dir(follow_symlinks=False)
+                except OSError:
+                    continue
+                newest = max(newest, int(st.st_mtime))
+                if is_dir:
+                    stack.append(entry.path)
+                else:
+                    total += st.st_size
+    return total, newest
+
+
+def _measure_path(path: Path) -> tuple[int, int]:
+    """Return ``(size_bytes, mtime)`` for a file or directory.
+
+    Args:
+        path: Existing file or directory.
+
+    Returns:
+        Current size and newest modification time (epoch seconds).
+
+    Raises:
+        OSError: If the path cannot be inspected.
+    """
+    if path.is_dir():
+        return _measure_tree(path)
+    st = path.stat()
+    return st.st_size, int(st.st_mtime)
+
+
+def fingerprint_candidate(candidate: Candidate) -> dict[str, object]:
+    """Capture a freshness fingerprint for a path-based candidate.
+
+    Args:
+        candidate: Candidate to fingerprint.
+
+    Returns:
+        ``{"exists", "size_bytes", "mtime"}``, or an empty dict when the candidate
+        has no meaningful path (opaque handles, git branches, missing paths).
+    """
+    if not _is_filesystem_path(candidate.path_or_handle) or candidate.category in _NO_FINGERPRINT_CATEGORIES:
+        return {}
+    path = Path(candidate.path_or_handle)
+    try:
+        if not path.exists():
+            return {}
+        size, mtime = _measure_path(path)
+    except OSError:
+        return {}
+    return {"exists": True, "size_bytes": size, "mtime": mtime}
+
+
+def fingerprint_plan(plan: Plan) -> dict[str, dict[str, object]]:
+    """Fingerprint every candidate of a plan that can be fingerprinted.
+
+    Args:
+        plan: Plan whose candidates should be fingerprinted.
+
+    Returns:
+        Mapping from candidate id to fingerprint (candidates without one are omitted).
+    """
+    out: dict[str, dict[str, object]] = {}
+    for c in plan.candidates:
+        fp = fingerprint_candidate(c)
+        if fp:
+            out[c.id] = fp
+    return out
+
+
 def validate_plan_freshness(plan: Plan, force_stale: bool = False) -> tuple[list[Candidate], list[str]]:
     """Re-stat each candidate in a plan and abort or warn on drift.
 
@@ -126,6 +231,12 @@ def validate_plan_freshness(plan: Plan, force_stale: bool = False) -> tuple[list
         skipped.append(f"Plan signed on {plan.signed_at.isoformat()} (>7 days old)")
 
     for c in plan.candidates:
+        # Opaque handles (docker://...) have no path to re-stat; the owning
+        # plugin validates them when it removes them.
+        if not _is_filesystem_path(c.path_or_handle):
+            valid.append(c)
+            continue
+
         path = Path(c.path_or_handle)
         fp = plan.fingerprints.get(c.id, {})
 
@@ -134,9 +245,7 @@ def validate_plan_freshness(plan: Plan, force_stale: bool = False) -> tuple[list
             continue
 
         try:
-            stat = path.stat()
-            current_size = stat.st_size if path.is_file() else c.size_bytes
-            current_mtime = int(stat.st_mtime)
+            current_size, current_mtime = _measure_path(path)
         except (OSError, ValueError):
             continue
 
@@ -276,11 +385,10 @@ def apply_plan(
     retention = profile_dict.get("quarantine_retention_days", 30)
 
     # Re-validate plan freshness
-    if plan.fingerprints:
+    if plan.fingerprints or plan.signed_at is not None:
         valid, skipped = validate_plan_freshness(plan, force_stale=force_stale)
-        if skipped and ctx.verbose:
-            for reason in skipped:
-                print(f"  [plan validation] {reason}")
+        for reason in skipped:
+            print(f"  [plan validation] {reason}")
         plan.candidates = valid
 
     if not plan.candidates:

@@ -36,9 +36,10 @@ bekas clean --apply --plan-file plan.json
 | `--accept-categories` | Comma-separated whitelist, e.g. `docker,node` |
 | `--plan-file` | Apply a saved, signed plan |
 | `--force-stale` | Apply a plan even if candidates changed since it was made |
+| `--allow-unsigned` | Accept a `--plan-file` that has no signature (a signed file is always verified) |
 
 <Aside type="caution">
-Stale plans are validated before applying: candidates that changed or disappeared since the plan was saved are skipped unless you use `--force-stale`.
+Plans saved with `bekas plan --save` record each candidate's size and modification time and are signed together with a timestamp. Before applying, candidates that grew, were modified or disappeared are skipped unless you use `--force-stale`, and a plan older than 7 days prints a warning. A plan file without a valid signature is refused.
 </Aside>
 
 ## One clean at a time

@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import json
 import sys
+from datetime import UTC, datetime
 
 import click
 
-from bekas.clean import CleanAborted, apply_plan
+from bekas.clean import CleanAborted, apply_plan, fingerprint_plan
 from bekas.config import (
     config_path,
     ensure_config,
@@ -158,6 +159,10 @@ def plan_cmd(
     plan = _audit_to_plan(report, safe_only=safe_only, include_review=include_review)
 
     if save:
+        # Record what each candidate looks like now, so `clean --plan-file` can
+        # refuse items that changed since. Both fields are covered by the signature.
+        plan.fingerprints = fingerprint_plan(plan)
+        plan.signed_at = datetime.now(UTC)
         plan_data = plan.model_dump(mode="json")
         plan_data["_signature"] = sign_plan(plan_data)
         with open(save, "w") as f:
@@ -172,6 +177,46 @@ def plan_cmd(
         click.echo(format_human(plan, top=top))
 
 
+def _load_plan_file(plan_file: str, allow_unsigned: bool) -> Plan:
+    """Load a saved plan and verify its signature, exiting on any problem.
+
+    Args:
+        plan_file: Path of the plan JSON written by ``plan --save``.
+        allow_unsigned: Accept a plan without ``_signature``. A plan that has a
+            signature is always verified, whatever this flag says.
+
+    Returns:
+        The parsed plan.
+    """
+    try:
+        with open(plan_file) as f:
+            plan_data = json.load(f)
+    except (OSError, ValueError) as exc:
+        click.echo(f"Error: could not read plan file: {exc}")
+        sys.exit(1)
+    if not isinstance(plan_data, dict):
+        click.echo("Error: plan file is not a valid plan.")
+        sys.exit(1)
+
+    signature = plan_data.pop("_signature", None)
+    if signature is None:
+        if not allow_unsigned:
+            click.echo(
+                "Error: plan file has no signature. Re-create it with `bekas plan --save`, "
+                "or pass --allow-unsigned if you wrote it yourself."
+            )
+            sys.exit(1)
+    elif not isinstance(signature, str) or not verify_plan(plan_data, signature):
+        click.echo("Error: plan file signature is invalid or was tampered with.")
+        sys.exit(1)
+
+    try:
+        return Plan(**plan_data)
+    except ValueError as exc:
+        click.echo(f"Error: plan file is not a valid plan: {exc}")
+        sys.exit(1)
+
+
 @cli.command("clean")
 @click.option("--apply", is_flag=True, help="Actually delete (default is dry-run).")
 @click.option("--safe-only", is_flag=True, help="Only clean safe-tier items.")
@@ -181,6 +226,7 @@ def plan_cmd(
 @click.option("--accept-categories", default=None, help="Comma-separated categories for non-interactive mode.")
 @click.option("--plan-file", type=click.Path(exists=True), default=None, help="Apply a saved JSON plan file.")
 @click.option("--force-stale", is_flag=True, help="Apply a plan even if candidates have drifted.")
+@click.option("--allow-unsigned", is_flag=True, help="Accept a --plan-file that carries no signature.")
 @click.pass_context
 def clean_cmd(
     ctx: click.Context,
@@ -192,6 +238,7 @@ def clean_cmd(
     accept_categories: str | None,
     plan_file: str | None,
     force_stale: bool,
+    allow_unsigned: bool,
 ) -> None:
     """Remove approved candidates. Dry-run by default."""
     profile_name = ctx.obj.get("profile")
@@ -203,13 +250,7 @@ def clean_cmd(
         sys.exit(2)
 
     if plan_file:
-        with open(plan_file) as f:
-            plan_data = json.load(f)
-        signature = plan_data.pop("_signature", None)
-        if signature and not verify_plan(plan_data, signature):
-            click.echo("Error: plan file signature is invalid or was tampered with.")
-            sys.exit(1)
-        plan = Plan(**plan_data)
+        plan = _load_plan_file(plan_file, allow_unsigned)
         report = None
     else:
         all_plugins = _get_plugins()
