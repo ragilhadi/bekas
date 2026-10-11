@@ -55,10 +55,26 @@ def _find_plugin(plugins: list[Plugin], name: str) -> Plugin | None:
     return None
 
 
-def _is_filesystem_path(handle: str) -> bool:
-    """Return True if a candidate handle is a plain absolute filesystem path.
+def _is_opaque_handle(handle: str) -> bool:
+    """Return True for handles that are not filesystem paths (``docker://<id>``).
 
-    Opaque handles such as ``docker://<id>`` are never filesystem paths.
+    Deliberately independent of the host OS: ``/some/path`` is a path on every
+    platform, even though Windows does not call it absolute (no drive letter).
+
+    Args:
+        handle: Candidate ``path_or_handle`` value.
+
+    Returns:
+        True when the handle is a URI-style identifier owned by a plugin.
+    """
+    return "://" in handle
+
+
+def _is_filesystem_path(handle: str) -> bool:
+    """Return True if a handle is a plain absolute filesystem path.
+
+    Used to decide whether generic deletion may touch it, so it also requires the
+    path to be absolute on this OS.
 
     Args:
         handle: Candidate ``path_or_handle`` value.
@@ -66,7 +82,7 @@ def _is_filesystem_path(handle: str) -> bool:
     Returns:
         True when the handle can safely be treated as a path.
     """
-    return "://" not in handle and Path(handle).is_absolute()
+    return not _is_opaque_handle(handle) and Path(handle).is_absolute()
 
 
 def _group_by_category(candidates: list[Candidate]) -> dict[str, list[Candidate]]:
@@ -118,7 +134,7 @@ def fingerprint_candidate(candidate: Candidate) -> dict[str, object]:
         ``{"exists", "size_bytes", "mtime"}``, or an empty dict when the candidate
         has no meaningful path (opaque handles, git branches, missing paths).
     """
-    if not _is_filesystem_path(candidate.path_or_handle) or candidate.category in _NO_FINGERPRINT_CATEGORIES:
+    if _is_opaque_handle(candidate.path_or_handle) or candidate.category in _NO_FINGERPRINT_CATEGORIES:
         return {}
     path = Path(candidate.path_or_handle)
     try:
@@ -174,7 +190,7 @@ def validate_plan_freshness(plan: Plan, force_stale: bool = False) -> tuple[list
     for c in plan.candidates:
         # Opaque handles (docker://...) have no path to re-stat; the owning
         # plugin validates them when it removes them.
-        if not _is_filesystem_path(c.path_or_handle):
+        if _is_opaque_handle(c.path_or_handle):
             valid.append(c)
             continue
 
