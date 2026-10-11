@@ -144,6 +144,8 @@ bekas undo                     # Undo the most recent run
 bekas undo <run_id>            # Undo a specific run
 ```
 
+`undo` can be repeated safely (already-restored items are skipped) and exits non-zero if an item could not be restored.
+
 ### `bekas quarantine`
 
 Files removed by plugins that support quarantine are moved to a quarantine directory instead of being permanently deleted. You can restore them later.

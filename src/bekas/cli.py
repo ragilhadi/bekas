@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import sys
+from collections.abc import Iterator
 from datetime import UTC, datetime
 
 import click
@@ -21,12 +23,29 @@ from bekas.config import (
 from bekas.database import get_run, list_quarantine, list_runs
 from bekas.events import read_events
 from bekas.formatters import format_human, format_json
-from bekas.locking import AlreadyRunningError
+from bekas.locking import AlreadyRunningError, ProcessLock
 from bekas.models import AuditReport, Confidence, Context, Plan
 from bekas.plugin import Plugin, discover_plugins
-from bekas.quarantine import purge_old_quarantine, restore_from_quarantine
+from bekas.quarantine import purge_old_quarantine, restore_from_quarantine, undo_run_results
 from bekas.runner import run_audit
 from bekas.signing import sign_plan, verify_plan
+
+
+@contextlib.contextmanager
+def _exclusive() -> Iterator[None]:
+    """Hold the single-instance lock around a mutating command.
+
+    Exits with status 3 (like ``clean``) when another bekas process holds it.
+
+    Yields:
+        Nothing; the lock is released when the block exits.
+    """
+    try:
+        with ProcessLock():
+            yield
+    except AlreadyRunningError as exc:
+        click.echo(str(exc))
+        sys.exit(3)
 
 
 def _get_plugins() -> list[Plugin]:
@@ -277,8 +296,6 @@ def clean_cmd(
     quarantine_enabled = profile.quarantine_enabled
 
     # Acquire single-instance lock for mutating commands
-    from bekas.locking import ProcessLock
-
     try:
         with ProcessLock():
             result = apply_plan(
@@ -368,9 +385,6 @@ def history_cmd(ctx: click.Context, run_id: str | None, since: int | None, json_
 @click.pass_context
 def undo_cmd(ctx: click.Context, run_id: str | None) -> None:
     """Undo the last apply or a specific run."""
-    from bekas.database import get_run
-    from bekas.quarantine import restore_from_quarantine
-
     if not run_id:
         runs = list_runs()
         if not runs:
@@ -383,38 +397,32 @@ def undo_cmd(ctx: click.Context, run_id: str | None) -> None:
         click.echo(f"Run {run_id} not found.")
         return
 
-    click.echo(f"Undo run {run_id}...")
-
-    import json
-
-    restored = 0
-    failed = 0
-    permanent = 0
     try:
         results = json.loads(run["results_json"])
     except Exception:
         click.echo("Could not parse run results.")
         return
 
-    for entry in results:
-        undo_token = entry.get("undo_token")
-        if not undo_token:
-            if entry.get("success") and entry.get("log") != "dry-run":
-                permanent += 1
-            continue
-        try:
-            restore_from_quarantine(undo_token)
-            restored += 1
-        except Exception as exc:
-            click.echo(f"  Failed to restore {undo_token}: {exc}")
-            failed += 1
+    click.echo(f"Undo run {run_id}...")
+    with _exclusive():
+        # Re-read under the lock: a concurrent undo may have restored items meanwhile.
+        fresh = get_run(run_id)
+        if fresh:
+            results = json.loads(fresh["results_json"])
+        outcome = undo_run_results(run_id, results)
 
-    if restored == 0 and failed == 0:
+    for token, reason in outcome.failed:
+        click.echo(f"  Failed to restore {token}: {reason}")
+    if outcome.restored == 0 and not outcome.failed and not outcome.already_restored:
         click.echo("No quarantined items to restore for this run.")
     else:
-        click.echo(f"Restored {restored} item(s). Failed: {failed}.")
-    if permanent:
-        click.echo(f"{permanent} item(s) were deleted permanently (not quarantined) and cannot be restored.")
+        click.echo(f"Restored {outcome.restored} item(s). Failed: {len(outcome.failed)}.")
+    if outcome.already_restored:
+        click.echo(f"{outcome.already_restored} item(s) were already restored by an earlier undo.")
+    if outcome.permanent:
+        click.echo(f"{outcome.permanent} item(s) were deleted permanently (not quarantined) and cannot be restored.")
+    if outcome.failed:
+        sys.exit(1)
 
 
 @cli.group("quarantine")
@@ -442,17 +450,20 @@ def quarantine_list() -> None:
 @click.argument("quarantine_id")
 def quarantine_restore(quarantine_id: str) -> None:
     """Restore a quarantined item to its original location."""
-    try:
-        dest = restore_from_quarantine(quarantine_id)
-        click.echo(f"Restored to {dest}")
-    except Exception as exc:
-        click.echo(f"Restore failed: {exc}")
+    with _exclusive():
+        try:
+            dest = restore_from_quarantine(quarantine_id)
+        except Exception as exc:
+            click.echo(f"Restore failed: {exc}")
+            sys.exit(1)
+    click.echo(f"Restored to {dest}")
 
 
 @quarantine_group.command("purge")
 def quarantine_purge() -> None:
     """Empty quarantine immediately."""
-    removed, freed = purge_old_quarantine(retention_days=0)
+    with _exclusive():
+        removed, freed = purge_old_quarantine(retention_days=0)
     click.echo(f"Purged {removed} items, freeing {_human_size(freed)}.")
 
 
