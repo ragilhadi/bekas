@@ -24,6 +24,7 @@ class ScreenshotsPlugin(Plugin):
     """
 
     name = "screenshots"
+    categories = ("screenshots.file",)
     description = "Finds old screenshot files on macOS, Linux, and Windows."
     requires_commands = []
     capabilities = Capabilities(quarantine=True, estimated_runtime="fast")

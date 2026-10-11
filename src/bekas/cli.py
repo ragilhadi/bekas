@@ -7,7 +7,7 @@ import sys
 
 import click
 
-from bekas.clean import apply_plan
+from bekas.clean import CleanAborted, apply_plan
 from bekas.config import (
     config_path,
     ensure_config,
@@ -254,6 +254,9 @@ def clean_cmd(
     except AlreadyRunningError as exc:
         click.echo(str(exc))
         sys.exit(3)
+    except CleanAborted as exc:
+        click.echo(str(exc))
+        sys.exit(exc.exit_code)
 
     if ctx.obj.get("json"):
         click.echo(format_json(result))

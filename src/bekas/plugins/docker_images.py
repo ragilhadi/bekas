@@ -25,6 +25,7 @@ class DockerImagesPlugin(Plugin):
     """
 
     name = "docker.images"
+    categories = ("docker.image.dangling", "docker.image.tagged")
     description = "Finds dangling and unused Docker images."
     requires_commands = ["docker"]
     capabilities = Capabilities(requires_cli=("docker",), quarantine=False, estimated_runtime="medium")

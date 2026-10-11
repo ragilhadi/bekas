@@ -25,6 +25,7 @@ class PythonVenvsPlugin(Plugin):
     """
 
     name = "python.venvs"
+    categories = ("python.venv",)
     description = "Finds Python virtual environments in abandoned projects."
     requires_commands = []
     capabilities = Capabilities(quarantine=True, estimated_runtime="medium")

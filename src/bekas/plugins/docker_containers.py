@@ -22,6 +22,7 @@ class DockerContainersPlugin(Plugin):
     """
 
     name = "docker.containers"
+    categories = ("docker.container.stopped",)
     description = "Finds stopped Docker containers older than a threshold."
     requires_commands = ["docker"]
     capabilities = Capabilities(requires_cli=("docker",), quarantine=False, estimated_runtime="fast")

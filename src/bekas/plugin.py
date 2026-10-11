@@ -52,6 +52,9 @@ class Plugin(ABC):
         supported_platforms: Optional list of platform names
             (e.g., ``["darwin", "linux", "windows"]``).
         capabilities: Capability manifest for the runner.
+        categories: Candidate categories this plugin emits when they differ
+            from ``name`` (e.g. ``docker.images`` emits ``docker.image.dangling``).
+            Used to route a candidate back to the plugin that owns it.
     """
 
     name: str = ""
@@ -59,6 +62,7 @@ class Plugin(ABC):
     requires_commands: list[str] = []
     supported_platforms: list[str] | None = None
     capabilities: Capabilities = Capabilities()
+    categories: tuple[str, ...] = ()
 
     def is_available(self, ctx: Context) -> bool:
         """Check if this plugin can run on the current system.

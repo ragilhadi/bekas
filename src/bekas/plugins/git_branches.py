@@ -24,6 +24,7 @@ class GitBranchesPlugin(Plugin):
     """
 
     name = "git.branches"
+    categories = ("git.branch",)
     description = "Finds fully merged local git branches older than a threshold."
     requires_commands = ["git"]
     capabilities = Capabilities(requires_cli=("git",), quarantine=False, estimated_runtime="medium")

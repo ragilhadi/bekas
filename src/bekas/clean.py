@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 import secrets
 import uuid
 from datetime import UTC, datetime, timedelta
@@ -17,20 +16,56 @@ from bekas.quarantine import move_to_quarantine, purge_old_quarantine
 from bekas.safety import is_excluded
 
 
+class CleanAborted(Exception):  # noqa: N818
+    """Raised when a clean run is stopped before any change is made.
+
+    Attributes:
+        exit_code: Process exit status the CLI should use.
+    """
+
+    def __init__(self, message: str, exit_code: int = 1) -> None:
+        """Initialize with a message and the CLI exit status.
+
+        Args:
+            message: Human-readable reason shown to the user.
+            exit_code: Exit status for the process.
+        """
+        super().__init__(message)
+        self.exit_code = exit_code
+
+
 def _find_plugin(plugins: list[Plugin], name: str) -> Plugin | None:
-    """Find a plugin by its exact name.
+    """Find the plugin that owns a candidate category.
+
+    A plugin owns a category when it equals ``Plugin.name`` or is listed in
+    ``Plugin.categories`` (plugins such as ``docker.images`` emit more specific
+    categories like ``docker.image.dangling``).
 
     Args:
         plugins: List of loaded plugins.
-        name: Plugin name to match against ``Plugin.name``.
+        name: Candidate category to resolve.
 
     Returns:
         The matching plugin, or None if not found.
     """
     for p in plugins:
-        if p.name == name:
+        if p.name == name or name in p.categories:
             return p
     return None
+
+
+def _is_filesystem_path(handle: str) -> bool:
+    """Return True if a candidate handle is a plain absolute filesystem path.
+
+    Opaque handles such as ``docker://<id>`` are never filesystem paths.
+
+    Args:
+        handle: Candidate ``path_or_handle`` value.
+
+    Returns:
+        True when the handle can safely be treated as a path.
+    """
+    return "://" not in handle and Path(handle).is_absolute()
 
 
 def _group_by_category(candidates: list[Candidate]) -> dict[str, list[Candidate]]:
@@ -154,7 +189,7 @@ def typed_confirmation_gate(
         non_interactive: If True and ``yes_all`` is False, exit without changes.
 
     Returns:
-        True if the user confirmed, False otherwise.
+        True if the user confirmed, False otherwise (including closed stdin).
     """
     if yes_all:
         return True
@@ -188,12 +223,18 @@ def typed_confirmation_gate(
         token = secrets.token_urlsafe(4)[:4].upper()
         lines.append(f"\n⚠  HIGH RISK detected. Type the token '{token}' to proceed, or Ctrl-C to abort:")
         print("\n".join(lines))
-        user_input = input("Token: ").strip().upper()
+        try:
+            user_input = input("Token: ").strip().upper()
+        except EOFError:
+            return False
         return user_input == token
 
     lines.append('\nType "yes" to proceed, or Ctrl-C to abort:')
     print("\n".join(lines))
-    user_input = input().strip().lower()
+    try:
+        user_input = input().strip().lower()
+    except EOFError:
+        return False
     return user_input == "yes"
 
 
@@ -242,9 +283,6 @@ def apply_plan(
                 print(f"  [plan validation] {reason}")
         plan.candidates = valid
 
-    # Purge old quarantine first
-    purge_old_quarantine(retention)
-
     if not plan.candidates:
         return RunResult(
             run_id=f"run_{uuid.uuid4().hex[:8]}",
@@ -256,33 +294,42 @@ def apply_plan(
     # Typed confirmation gate
     if not ctx.dry_run:
         if non_interactive and not yes_all:
-            print("Error: --non-interactive requires --yes-all.")
-            os._exit(2)  # noqa: S607
+            raise CleanAborted("Error: --non-interactive requires --yes-all.", exit_code=2)
         confirmed = typed_confirmation_gate(plan, quarantine_enabled, yes_all=yes_all, non_interactive=non_interactive)
         if not confirmed:
-            print("Aborted. No changes were made.")
-            os._exit(1)  # noqa: S607
+            raise CleanAborted("Aborted. No changes were made.", exit_code=1)
+
+        # Only now that the user has confirmed is it acceptable to discard
+        # expired quarantine entries. A failure here must not abort the clean.
+        try:
+            purge_old_quarantine(retention)
+        except Exception as exc:
+            if ctx.verbose:
+                print(f"  [quarantine purge] skipped: {exc}")
 
     groups = _group_by_category(plan.candidates)
     per_candidate: list[tuple[Candidate, RemovalResult]] = []
     total_freed = 0
     run_id = f"run_{uuid.uuid4().hex[:8]}"
 
-    for cat, items in groups.items():
-        size = sum(c.size_bytes for c in items)
-        if not yes_all and not ctx.dry_run:
-            # Interactive prompt per category (secondary confirmation)
-            resp = input(f"About to delete {len(items)} {cat} items ({_human_size(size)}). Confirm? [y/N] ")
-            if resp.strip().lower() != "y":
-                continue
-
+    for items in groups.values():
         for c in items:
             if is_excluded(c.path_or_handle):
                 continue
             plugin = _find_plugin(plugins, c.category)
             removal_result: RemovalResult
             if plugin is None:
-                # Fall back to generic deletion if no plugin matched category exactly
+                if not _is_filesystem_path(c.path_or_handle):
+                    # Opaque handles (docker://, ...) can only be removed by the owning plugin.
+                    removal_result = RemovalResult(
+                        success=False,
+                        bytes_freed=0,
+                        log=f"No plugin handles category {c.category!r}; refusing to treat "
+                        f"{c.path_or_handle!r} as a path.",
+                    )
+                    per_candidate.append((c, removal_result))
+                    continue
+                # Third-party/legacy category with a plain path: generic deletion.
                 removal_result = _generic_remove(c, ctx, quarantine_enabled, run_id)
                 if removal_result.success:
                     total_freed += removal_result.bytes_freed
