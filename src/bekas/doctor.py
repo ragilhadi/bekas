@@ -12,7 +12,7 @@ import psutil
 import yaml
 
 from bekas.config import config_path, ensure_config, quarantine_dir, runs_db_path
-from bekas.plugin import discover_plugins
+from bekas.plugin import load_plugins
 
 
 class CheckResult:
@@ -188,7 +188,15 @@ def _check_plugins() -> CheckResult:
         CheckResult indicating pass, fail, or warn.
     """
     try:
-        plugins = discover_plugins()
+        plugins, errors = load_plugins()
+        if errors:
+            failed = "; ".join(f"{e.entry_point}: {e.error}" for e in errors)
+            return CheckResult(
+                "plugins",
+                "warn",
+                f"{len(plugins)} plugins loaded, {len(errors)} failed to load",
+                detail=failed,
+            )
         return CheckResult("plugins", "pass", f"{len(plugins)} plugins loaded")
     except Exception as exc:
         return CheckResult("plugins", "fail", f"Plugin discovery failed: {exc}")

@@ -21,7 +21,7 @@ bekas plan --save plan.json    # write a signed plan file
 ```bash
 bekas clean                          # preview only
 bekas clean --apply --safe-only      # remove SAFE items
-bekas clean --apply --review         # include REVIEW items (interactive)
+bekas clean --apply --review         # also include REVIEW items
 bekas clean --apply --yes-all        # skip per-category prompts
 bekas clean --apply --plan-file plan.json
 ```
@@ -29,8 +29,8 @@ bekas clean --apply --plan-file plan.json
 | Option | Meaning |
 |---|---|
 | `--apply` | Actually remove things |
-| `--safe-only` | Only SAFE-tier candidates |
-| `--review` | Include REVIEW-tier candidates |
+| `--safe-only` | Only SAFE-tier candidates (the default; cannot be combined with `--review`) |
+| `--review` | Also include REVIEW-tier candidates; the typed confirmation still applies |
 | `--yes-all` | Skip prompts |
 | `--non-interactive` | For CI; needs `--yes-all` or `--accept-categories` |
 | `--accept-categories` | Comma-separated whitelist, e.g. `docker,node` |

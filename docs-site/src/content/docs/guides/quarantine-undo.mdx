@@ -36,3 +36,5 @@ bekas undo <run_id>
 ```
 
 `undo` restores every quarantined item of the run. Items removed permanently (plugins without quarantine support, or runs with quarantine disabled) cannot be restored; `undo` reports how many.
+
+Undo is safe to repeat: items restored by an earlier `undo` of the same run are reported as already restored and left alone. If an item cannot be restored (for example its quarantined data was purged, or something now exists at the original path) `undo` and `quarantine restore` print the reason and exit with status 1. Moves into and out of quarantine across filesystems copy first, so a failure never leaves a half-written copy and the original is only removed after the copy is complete.

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 import secrets
 import uuid
 from datetime import UTC, datetime, timedelta
@@ -11,6 +10,7 @@ from pathlib import Path
 from bekas.config import load_config, profile_for, quarantine_dir
 from bekas.database import log_run
 from bekas.events import Event, log_event
+from bekas.fsmeasure import measure_path as _measure_path
 from bekas.models import AuditReport, Candidate, Confidence, Context, Plan, RemovalResult, RunResult
 from bekas.plugin import Plugin
 from bekas.quarantine import move_to_quarantine, purge_old_quarantine
@@ -106,65 +106,6 @@ def _human_size(size_bytes: int) -> str:
 # branch lives in a repository, which changes with every commit), so the path
 # says nothing about whether the candidate itself changed.
 _NO_FINGERPRINT_CATEGORIES = frozenset({"git.branch"})
-
-# Upper bound on directory entries visited when measuring a candidate. Keeps
-# ``plan --save`` and ``clean`` fast on enormous trees; the result stays
-# deterministic for an unchanged tree.
-_MAX_FINGERPRINT_ENTRIES = 50_000
-
-
-def _measure_tree(root: Path) -> tuple[int, int]:
-    """Measure a directory cheaply without following symlinks.
-
-    Args:
-        root: Directory to measure.
-
-    Returns:
-        ``(total_file_bytes, newest_mtime)`` over the directory and its entries.
-    """
-    total = 0
-    newest = int(root.stat().st_mtime)
-    visited = 0
-    stack = [str(root)]
-    while stack:
-        try:
-            it = os.scandir(stack.pop())
-        except OSError:
-            continue
-        with it:
-            for entry in it:
-                visited += 1
-                if visited > _MAX_FINGERPRINT_ENTRIES:
-                    return total, newest
-                try:
-                    st = entry.stat(follow_symlinks=False)
-                    is_dir = entry.is_dir(follow_symlinks=False)
-                except OSError:
-                    continue
-                newest = max(newest, int(st.st_mtime))
-                if is_dir:
-                    stack.append(entry.path)
-                else:
-                    total += st.st_size
-    return total, newest
-
-
-def _measure_path(path: Path) -> tuple[int, int]:
-    """Return ``(size_bytes, mtime)`` for a file or directory.
-
-    Args:
-        path: Existing file or directory.
-
-    Returns:
-        Current size and newest modification time (epoch seconds).
-
-    Raises:
-        OSError: If the path cannot be inspected.
-    """
-    if path.is_dir():
-        return _measure_tree(path)
-    st = path.stat()
-    return st.st_size, int(st.st_mtime)
 
 
 def fingerprint_candidate(candidate: Candidate) -> dict[str, object]:
