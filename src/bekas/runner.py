@@ -181,7 +181,7 @@ def run_audit(
 
     # Filter excluded candidates
     for r in reports:
-        r.candidates = filter_candidates(r.candidates, user_exclusions)
+        r.candidates = filter_candidates(r.candidates, user_exclusions, profile.min_quiet_hours)
 
     duration_ms = int((time.time() - started_ts) * 1000)
     total_candidates = sum(len(pr.candidates) for pr in reports)

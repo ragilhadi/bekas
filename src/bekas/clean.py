@@ -7,13 +7,13 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from bekas.config import profile_for, quarantine_dir
+from bekas.config import load_config, profile_for, quarantine_dir
 from bekas.database import log_run
 from bekas.events import Event, log_event
 from bekas.models import AuditReport, Candidate, Confidence, Context, Plan, RemovalResult, RunResult
 from bekas.plugin import Plugin
 from bekas.quarantine import move_to_quarantine, purge_old_quarantine
-from bekas.safety import is_excluded
+from bekas.safety import is_safe_to_delete
 
 
 class CleanAborted(Exception):  # noqa: N818
@@ -312,9 +312,18 @@ def apply_plan(
     total_freed = 0
     run_id = f"run_{uuid.uuid4().hex[:8]}"
 
+    # Re-apply the full safety policy at apply time: the config may have gained
+    # exclusions since the plan was created, and files may have been touched.
+    user_exclusions = load_config().exclude
+    min_quiet_hours = profile.min_quiet_hours
+
     for items in groups.values():
         for c in items:
-            if is_excluded(c.path_or_handle):
+            safe, reason = is_safe_to_delete(c.path_or_handle, user_exclusions, min_quiet_hours)
+            if not safe:
+                per_candidate.append(
+                    (c, RemovalResult(success=False, bytes_freed=0, log=f"skipped by safety rules: {reason}"))
+                )
                 continue
             plugin = _find_plugin(plugins, c.category)
             removal_result: RemovalResult

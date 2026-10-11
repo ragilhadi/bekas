@@ -66,8 +66,8 @@ def test_symlink_resolution_is_excluded(tmp_path: Path) -> None:
     secret.mkdir()
     symlink = tmp_path / "link_to_secret"
     symlink.symlink_to(secret)
-    # The resolved path is under tmp_path, not a hard exclusion, so it passes
-    assert is_excluded(symlink) is False
+    # tmp_path lives outside $HOME, so a symlink there is rejected (docs/SAFETY.md)
+    assert is_excluded(symlink) is True
 
 
 def test_case_sensitivity_non_windows(tmp_path: Path) -> None:

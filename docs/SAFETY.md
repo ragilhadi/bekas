@@ -7,13 +7,24 @@ deleting system-critical data.
 
 The following paths are **never** considered safe for deletion:
 
-- **System directories:** `/`, `/usr`, `/etc`, `/bin`, `/sbin`, `/var` (except known temp subpaths), `/System` (macOS), `/Library` (macOS — except specific subpaths), `C:\Windows`, `C:\Program Files*` (Windows).
-- **Home directory itself:** Only contents of subdirectories under `$HOME` are candidates; `$HOME` itself is never deleted.
+- **System directories:** `/usr`, `/etc`, `/bin`, `/sbin`, `/lib*`, `/var/{db,lib,log,run,spool}`, `/System` (macOS), `/Library` (macOS), `C:\Windows`, `C:\Program Files*` (Windows) and everything inside them.
+- **Protected locations (the directory itself, not its contents):** `/`, `/home`, `/Users`, `/root`, `/opt`, `/srv`, `/mnt`, `/media`, `/tmp`, `/var/tmp` and `$HOME`. Their children, such as `~/.cache/pip` or `/tmp/build`, can still be candidates.
+- **Anything that contains a protected path:** a candidate that is a parent of `~/.ssh`, `~/.gnupg`, the bekas data directory or a system directory is excluded too, because removing it would remove them (this is why `$HOME`, `/var` and `/` can never be candidates).
 - **Active virtual environments:** Anything inside `$VIRTUAL_ENV` or `$CONDA_PREFIX` if currently set.
 - **Git repositories themselves:** `.git` directories are protected; only their orphan objects/branches may be cleaned by `git_branches`.
 - **Non-local filesystems:** Paths on NFS, SMB, or FUSE mounts are excluded (detected via `psutil.disk_partitions`).
-- **Symlinks pointing outside `$HOME`:** Followed and rejected.
-- **Recently modified files:** Files modified within the last `min_quiet_hours` (default 6 hours) are excluded.
+- **Symlinks pointing outside `$HOME`:** Rejected. The check is made on the path as supplied, before symlinks are resolved.
+- **Recently modified files:** Files modified within the last `min_quiet_hours` (profile setting, default 6 hours) are excluded, both when auditing and again when a plan is applied.
+- **Your own exclusions (`exclude:` in the config):** gitignore-style patterns, re-checked when a plan is applied so an exclusion added after `plan --save` still protects the path. See below.
+
+## Exclusion patterns
+
+Patterns in the `exclude:` list of the config use gitignore-style matching on `/`-separated paths:
+
+- `*` and `?` match within one path segment; `**` matches across segments; `[abc]` / `[!abc]` are character classes.
+- A pattern without a `/` (`node_modules`, `*.bak`) or a relative one (`foo/*.log`) matches at any depth.
+- An absolute pattern (`/data/keep`) or one starting with `~/` is anchored there. `~` is only expanded at the start.
+- A pattern that matches a directory also excludes everything inside it.
 
 ## Per-Plugin Safety Notes
 

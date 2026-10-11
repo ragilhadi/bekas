@@ -240,7 +240,7 @@ class TestEndToEnd:
         assert report.audit_id is not None
 
     def test_apply_plan_excluded_paths(self, tmp_path):
-        """Excluded paths are silently skipped during apply."""
+        """Excluded paths are never touched and are reported as skipped."""
         home = tmp_path / "home"
         home.mkdir()
         f1 = home / "file.txt"
@@ -259,4 +259,6 @@ class TestEndToEnd:
         ctx = Context(dry_run=False, config={})
         result = apply_plan(plan, [], ctx, yes_all=True)
         assert result.total_bytes_freed == 0
-        assert len(result.per_candidate) == 0  # Excluded before processing
+        assert len(result.per_candidate) == 1
+        assert result.per_candidate[0][1].success is False
+        assert "skipped by safety rules" in result.per_candidate[0][1].log
