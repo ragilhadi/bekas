@@ -67,10 +67,16 @@ def format_human(
             safe = sum(1 for c in pr.candidates if c.confidence.value == "safe")
             size = sum(c.size_bytes for c in pr.candidates)
             lines.append(f"  {pr.name:30s} {pr.candidates_found:3d} found, {safe:3d} safe    {_human_size(size)}")
+            if pr.error:
+                lines.append(f"    ! {pr.name} failed: {pr.error}")
             for c in candidates:
                 flag = "~" if c.metadata.get("size_approximate") else " "
                 lines.append(f"    [{c.confidence.value:6s}] {flag}{c.id} — {_human_size(c.size_bytes)}")
         lines.append("")
+        failed = [pr for pr in report.plugins if pr.error]
+        if failed:
+            lines.append(f"{len(failed)} plugin(s) did not complete; their results are missing from the totals.")
+            lines.append("")
         summary = report.summary
         lines.append(f"Total reclaimable:    {_human_size(summary.total_bytes)}")
         for conf in Confidence:
@@ -145,6 +151,12 @@ def format_md(report: AuditReport) -> str:
         safe = sum(1 for c in pr.candidates if c.confidence.value == "safe")
         size = sum(c.size_bytes for c in pr.candidates)
         lines.append(f"| {pr.name} | {pr.candidates_found} | {safe} | {_human_size(size)} |")
+    failed = [pr for pr in report.plugins if pr.error]
+    if failed:
+        lines.append("")
+        lines.append("**Plugins that did not complete**")
+        for pr in failed:
+            lines.append(f"- `{pr.name}`: {pr.error}")
     lines.append("")
     summary = report.summary
     lines.append(f"**Total reclaimable**: {_human_size(summary.total_bytes)}")

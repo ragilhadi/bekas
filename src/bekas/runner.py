@@ -4,36 +4,41 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 import platform
 import shutil
+import threading
 import time
 import uuid
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import UTC, datetime
+from pathlib import Path
 
 from bekas.config import is_plugin_enabled, load_config, profile_for
 from bekas.database import _init_db, get_audit_cache, prune_audit_cache, set_audit_cache
+from bekas.fsmeasure import measure_path
 from bekas.models import AuditReport, AuditSummary, Candidate, Confidence, Context, PluginReport, SystemInfo
 from bekas.plugin import Plugin
 from bekas.safety import filter_candidates
 
 
 def _fingerprint(path: str) -> str:
-    """Compute a cheap filesystem fingerprint for caching.
+    """Compute a cheap content-aware fingerprint for caching.
+
+    Files hash their size and mtime. Directories hash the total size and the
+    newest mtime found anywhere in the tree (bounded walk), because a
+    directory's own mtime does not change when nested files grow.
 
     Args:
         path: Filesystem path to fingerprint.
 
     Returns:
-        Hash string of size + mtime, or empty string if unavailable.
+        Hash string, or empty string if the path cannot be inspected.
     """
     try:
-        st = os.stat(path)
-        data = json.dumps({"size": st.st_size, "mtime": int(st.st_mtime)}, sort_keys=True)
-        return hashlib.sha256(data.encode()).hexdigest()[:16]
-    except OSError:
+        size, mtime = measure_path(Path(path))
+    except (OSError, ValueError):
         return ""
+    data = json.dumps({"size": size, "mtime": mtime}, sort_keys=True)
+    return hashlib.sha256(data.encode()).hexdigest()[:16]
 
 
 def _cached_discover(plugin: Plugin, ctx: Context, no_cache: bool = False) -> list[Candidate]:
@@ -80,8 +85,9 @@ def _cached_discover(plugin: Plugin, ctx: Context, no_cache: bool = False) -> li
 def _run_plugin(plugin: Plugin, ctx: Context, no_cache: bool = False) -> PluginReport:
     """Run a single plugin and collect discovered candidates.
 
-    Exceptions raised during discovery are swallowed so that a crashing
-    plugin does not abort the entire audit.
+    A plugin that raises does not abort the audit; the exception is recorded
+    in ``PluginReport.error`` so the failure is visible instead of looking
+    like "nothing found".
 
     Args:
         plugin: Plugin instance to run.
@@ -89,15 +95,103 @@ def _run_plugin(plugin: Plugin, ctx: Context, no_cache: bool = False) -> PluginR
         no_cache: If True, skip audit cache reads/writes.
 
     Returns:
-        PluginReport containing discovered candidates and the raw count.
+        PluginReport containing discovered candidates (empty on failure) and
+        the error message, if any.
     """
-    candidates: list[Candidate] = []
     try:
         candidates = _cached_discover(plugin, ctx, no_cache=no_cache)
-    except Exception:
-        # A crashing plugin must not crash the audit
-        pass
+    except Exception as exc:
+        return PluginReport(
+            name=plugin.name,
+            candidates_found=0,
+            candidates=[],
+            error=f"{type(exc).__name__}: {exc}",
+        )
     return PluginReport(name=plugin.name, candidates_found=len(candidates), candidates=candidates)
+
+
+class _Job:
+    """One plugin run executing on its own daemon thread."""
+
+    def __init__(self, plugin: Plugin) -> None:
+        self.plugin = plugin
+        self.done = threading.Event()
+        self.started_at: float | None = None
+        self.report: PluginReport | None = None
+        self.slot_released = False
+
+
+def _run_jobs(
+    plugins: list[Plugin],
+    ctx: Context,
+    no_cache: bool,
+    timeout: float,
+    max_parallel: int,
+) -> list[PluginReport]:
+    """Run plugins concurrently, enforcing a wall-clock timeout per plugin.
+
+    Each plugin runs on a daemon thread so that one stuck in a blocking call
+    (e.g. a hung ``docker`` daemon) can be abandoned: Python threads cannot be
+    killed, but being daemons they never keep the process alive. The timeout
+    counts from the moment the plugin actually starts, not from when it queued.
+
+    Args:
+        plugins: Plugins to run.
+        ctx: Execution context.
+        no_cache: Bypass the audit cache.
+        timeout: Seconds a plugin may run before it is reported as timed out.
+        max_parallel: Maximum plugins running at once.
+
+    Returns:
+        One report per plugin, in the order given.
+    """
+    slots = threading.Semaphore(max(1, max_parallel))
+    slot_lock = threading.Lock()
+    jobs = [_Job(p) for p in plugins]
+
+    def _release_slot(job: _Job) -> None:
+        # A timed-out plugin hands its slot back at once so it cannot starve the
+        # plugins queued behind it; the flag stops the thread releasing it twice
+        # if it ever finishes.
+        with slot_lock:
+            if not job.slot_released:
+                job.slot_released = True
+                slots.release()
+
+    def _work(job: _Job) -> None:
+        slots.acquire()
+        try:
+            job.started_at = time.monotonic()
+            job.report = _run_plugin(job.plugin, ctx, no_cache=no_cache)
+        except BaseException as exc:  # noqa: BLE001
+            job.report = PluginReport(
+                name=job.plugin.name, candidates_found=0, candidates=[], error=f"{type(exc).__name__}: {exc}"
+            )
+        finally:
+            _release_slot(job)
+            job.done.set()
+
+    for job in jobs:
+        threading.Thread(target=_work, args=(job,), name=f"bekas-{job.plugin.name}", daemon=True).start()
+
+    reports: list[PluginReport] = []
+    for job in jobs:
+        while not job.done.wait(0.05):
+            if job.started_at is not None and time.monotonic() - job.started_at > timeout:
+                break
+        if job.done.is_set() and job.report is not None:
+            reports.append(job.report)
+        else:
+            _release_slot(job)
+            reports.append(
+                PluginReport(
+                    name=job.plugin.name,
+                    candidates_found=0,
+                    candidates=[],
+                    error=f"timed out after {timeout:g}s",
+                )
+            )
+    return reports
 
 
 def run_audit(
@@ -148,36 +242,7 @@ def run_audit(
 
     started = datetime.now(UTC)
     started_ts = time.time()
-    reports: list[PluginReport] = []
-
-    if serial:
-        for p in enabled:
-            reports.append(_run_plugin(p, ctx, no_cache=no_cache))
-    else:
-        with ThreadPoolExecutor(max_workers=min(16, len(enabled) or 1)) as ex:
-            futures = {ex.submit(_run_plugin, p, ctx, no_cache): p for p in enabled}
-            for fut in as_completed(futures):
-                p = futures[fut]
-                try:
-                    reports.append(fut.result(timeout=timeout))
-                except TimeoutError:
-                    reports.append(
-                        PluginReport(
-                            name=p.name,
-                            candidates_found=0,
-                            candidates=[],
-                            error=f"timed out after {timeout}s",
-                        )
-                    )
-                except Exception as exc:  # noqa: BLE001
-                    reports.append(
-                        PluginReport(
-                            name=p.name,
-                            candidates_found=0,
-                            candidates=[],
-                            error=f"{type(exc).__name__}: {exc}",
-                        )
-                    )
+    reports = _run_jobs(enabled, ctx, no_cache, timeout, max_parallel=1 if serial else 16)
 
     # Filter excluded candidates
     for r in reports:

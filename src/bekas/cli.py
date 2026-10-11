@@ -152,7 +152,7 @@ def plan_cmd(
     top: int | None,
     no_cache: bool,
 ) -> None:
-    """Preview what clean would do."""
+    """Run a fresh audit and preview what clean would do."""
     profile_name = ctx.obj.get("profile")
     all_plugins = _get_plugins()
     report = run_audit(all_plugins, profile_name=profile_name, no_cache=no_cache)
@@ -309,7 +309,7 @@ def clean_cmd(
 @click.argument("candidate_id")
 @click.pass_context
 def inspect_cmd(ctx: click.Context, candidate_id: str) -> None:
-    """Show full reasoning for a single candidate."""
+    """Run a fresh audit and show full reasoning for a single candidate."""
     all_plugins = _get_plugins()
     report = run_audit(all_plugins, profile_name=ctx.obj.get("profile"))
     for pr in report.plugins:
@@ -326,7 +326,7 @@ def inspect_cmd(ctx: click.Context, candidate_id: str) -> None:
                     for k, v in c.metadata.items():
                         click.echo(f"  {k}: {v}")
                 return
-    click.echo(f"Candidate {candidate_id} not found in latest audit.")
+    click.echo(f"Candidate {candidate_id} not found. `inspect` runs a fresh audit; it may no longer exist.")
 
 
 @cli.command("history")

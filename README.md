@@ -90,7 +90,7 @@ bekas audit --top 20           # Only show top 20 candidates
 
 ### `bekas plan`
 
-Converts the latest audit into a concrete removal plan. You can save a cryptographically signed plan to disk and apply it later.
+Runs a fresh audit (audits are not stored between commands) and converts it into a concrete removal plan. You can save a cryptographically signed plan to disk and apply it later.
 
 ```bash
 bekas plan                     # Preview in human-readable format
@@ -125,7 +125,7 @@ Options:
 
 ### `bekas inspect <id>`
 
-Show full metadata and reasoning for a single candidate.
+Show full metadata and reasoning for a single candidate. This runs a fresh audit to find it, so an id from an earlier audit may no longer exist.
 
 ```bash
 bekas inspect ss:Screenshot_2023-01-01.png
