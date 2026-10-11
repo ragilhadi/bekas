@@ -6,6 +6,7 @@ from unittest.mock import patch
 import pytest
 
 from bekas.clean import (
+    CleanAborted,
     _generic_remove,
     apply_plan,
     typed_confirmation_gate,
@@ -129,7 +130,7 @@ def test_apply_plan_empty_after_validation():
 
 
 def test_apply_plan_non_interactive_without_yes_all():
-    """non_interactive without yes_all should call os._exit(2)."""
+    """non_interactive without yes_all should raise CleanAborted(exit_code=2)."""
     c = Candidate(
         id="x:1",
         category="test.item",
@@ -140,16 +141,13 @@ def test_apply_plan_non_interactive_without_yes_all():
     )
     plan = Plan(audit_id="a1", candidates=[c])
     ctx = Context(dry_run=False, config={}, verbose=False)
-    with (
-        patch("bekas.clean.os._exit", side_effect=lambda code: exec("raise SystemExit(code)")),
-        pytest.raises(SystemExit) as exc_info,
-    ):
+    with pytest.raises(CleanAborted) as exc_info:
         apply_plan(plan, [], ctx, non_interactive=True, yes_all=False)
-    assert exc_info.value.code == 2
+    assert exc_info.value.exit_code == 2
 
 
 def test_apply_plan_aborted_confirmation():
-    """If typed_confirmation_gate returns False, should call os._exit(1)."""
+    """If typed_confirmation_gate returns False, should raise CleanAborted(exit_code=1)."""
     c = Candidate(
         id="x:1",
         category="test.item",
@@ -160,13 +158,9 @@ def test_apply_plan_aborted_confirmation():
     )
     plan = Plan(audit_id="a1", candidates=[c])
     ctx = Context(dry_run=False, config={}, verbose=False)
-    with (
-        patch("bekas.clean.typed_confirmation_gate", return_value=False),
-        patch("bekas.clean.os._exit", side_effect=lambda code: exec("raise SystemExit(code)")),
-        pytest.raises(SystemExit) as exc_info,
-    ):
+    with patch("bekas.clean.typed_confirmation_gate", return_value=False), pytest.raises(CleanAborted) as exc_info:
         apply_plan(plan, [], ctx)
-    assert exc_info.value.code == 1
+    assert exc_info.value.exit_code == 1
 
 
 def test_typed_confirmation_gate_non_interactive():

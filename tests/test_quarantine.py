@@ -82,13 +82,11 @@ def test_restore_from_quarantine_by_path(tmp_path: Path):
                 "original_path": str(tmp_path / "orig.txt"),
             }
         ]
-        with (
-            patch("bekas.quarantine.remove_quarantine_entry") as mock_remove,
-            patch("pathlib.Path.exists") as mock_exists,
-        ):
-            mock_exists.return_value = False
-            with patch("shutil.move"):
-                restore_from_quarantine(str(tmp_path / "x.txt"))
+        (tmp_path / "x.txt").write_text("data")
+        with patch("bekas.quarantine.remove_quarantine_entry") as mock_remove:
+            restore_from_quarantine(str(tmp_path / "x.txt"))
+        assert (tmp_path / "orig.txt").read_text() == "data"
+        mock_remove.assert_called_once_with("q_abc123")
 
 
 def test_purge_old_quarantine(tmp_path: Path):

@@ -25,6 +25,7 @@ class DockerImagesPlugin(Plugin):
     """
 
     name = "docker.images"
+    categories = ("docker.image.dangling", "docker.image.tagged")
     description = "Finds dangling and unused Docker images."
     requires_commands = ["docker"]
     capabilities = Capabilities(requires_cli=("docker",), quarantine=False, estimated_runtime="medium")
@@ -77,7 +78,7 @@ class DockerImagesPlugin(Plugin):
                     if used_by_container:
                         cnames = _container_names_for_image(ctx, img_id)
                         reason_parts.append(
-                            f"Currently used by container(s): {', '.join(cnames)}. " "Remove the container first."
+                            f"Currently used by container(s): {', '.join(cnames)}. Remove the container first."
                         )
                         conf = Confidence.MANUAL
                     else:

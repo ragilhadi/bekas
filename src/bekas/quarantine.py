@@ -2,13 +2,106 @@
 
 from __future__ import annotations
 
+import errno
+import os
 import shutil
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
 from bekas.config import quarantine_dir
-from bekas.database import add_quarantine, list_quarantine, remove_quarantine_entry
+from bekas.database import (
+    add_quarantine,
+    list_quarantine,
+    mark_undo_restored,
+    remove_quarantine_entry,
+)
+
+
+class PartialMoveError(OSError):
+    """A cross-device move copied the data but could not remove the original.
+
+    Attributes:
+        dest: Location of the complete copy.
+    """
+
+    def __init__(self, dest: Path, cause: OSError) -> None:
+        """Initialize with the complete copy and the removal error.
+
+        Args:
+            dest: Location of the complete copy.
+            cause: The error raised while removing the original.
+        """
+        super().__init__(
+            f"copied to {dest} but could not remove the original ({cause}); remaining files were left in place"
+        )
+        self.dest = dest
+
+
+def _remove_path(path: Path) -> None:
+    """Delete a file, symlink or directory tree if it exists.
+
+    Args:
+        path: Path to delete.
+    """
+    if path.is_dir() and not path.is_symlink():
+        shutil.rmtree(path)
+    elif path.exists() or path.is_symlink():
+        path.unlink()
+
+
+def _safe_move(src: Path, dst: Path) -> None:
+    """Move ``src`` to ``dst`` without ever leaving a half-written destination.
+
+    Same-filesystem moves are an atomic rename. Across filesystems the data is
+    copied first; if the copy fails the partial destination is removed and the
+    original is untouched.
+
+    Args:
+        src: Existing file or directory.
+        dst: Destination that must not exist.
+
+    Raises:
+        PartialMoveError: The copy succeeded but the original could not be fully removed.
+        OSError: The move failed; the original is intact.
+    """
+    try:
+        os.rename(src, dst)
+        return
+    except OSError as exc:
+        if exc.errno != errno.EXDEV:
+            raise
+
+    try:
+        if src.is_dir() and not src.is_symlink():
+            shutil.copytree(src, dst, symlinks=True)
+        else:
+            shutil.copy2(src, dst, follow_symlinks=False)
+    except BaseException:
+        _remove_path(dst)
+        raise
+
+    try:
+        _remove_path(src)
+    except OSError as exc:
+        raise PartialMoveError(dst, exc) from exc
+
+
+def _parse_timestamp(value: str) -> datetime | None:
+    """Parse a stored ISO timestamp, treating a naive one as UTC.
+
+    Args:
+        value: Timestamp string from the database.
+
+    Returns:
+        Timezone-aware datetime, or None if it cannot be parsed.
+    """
+    try:
+        ts = datetime.fromisoformat(value)
+    except (TypeError, ValueError):
+        return None
+    return ts if ts.tzinfo is not None else ts.replace(tzinfo=UTC)
 
 
 def quarantine_path(timestamp: datetime | None = None) -> Path:
@@ -57,12 +150,20 @@ def move_to_quarantine(
         dest = qdir / f"{original.name}_{counter}"
         counter += 1
 
-    if original.is_dir():
-        shutil.move(str(original), str(dest))
-    else:
-        shutil.move(str(original), str(dest))
+    try:
+        _safe_move(original, dest)
+    except PartialMoveError:
+        # The complete copy is in quarantine, so it must be restorable even
+        # though the original could not be fully removed.
+        add_quarantine(run_id, category, str(original), str(dest), size_bytes, metadata)
+        raise
 
-    add_quarantine(run_id, category, str(original), str(dest), size_bytes, metadata)
+    try:
+        add_quarantine(run_id, category, str(original), str(dest), size_bytes, metadata)
+    except Exception:
+        # Never leave an item in quarantine that the database does not know about.
+        _safe_move(dest, original)
+        raise
     return dest
 
 
@@ -89,10 +190,12 @@ def restore_from_quarantine(qid: str) -> Path:
         raise FileNotFoundError(f"Quarantine item {qid} not found")
     src = Path(row["quarantine_path"])
     dest = Path(row["original_path"])
+    if not src.exists() and not src.is_symlink():
+        raise FileNotFoundError(f"Quarantined data is missing: {src}")
     if dest.exists():
         raise FileExistsError(f"Restore destination already exists: {dest}")
     dest.parent.mkdir(parents=True, exist_ok=True)
-    shutil.move(str(src), str(dest))
+    _safe_move(src, dest)
     remove_quarantine_entry(row["quarantine_id"])
     return dest
 
@@ -108,19 +211,67 @@ def purge_old_quarantine(retention_days: int = 30) -> tuple[int, int]:
         Tuple of (items_removed, bytes_freed).
     """
     cutoff = datetime.now(UTC) - timedelta(days=retention_days)
-    rows = list_quarantine()
     removed = 0
     bytes_freed = 0
-    for row in rows:
-        ts = datetime.fromisoformat(row["timestamp"])
-        if ts < cutoff:
+    for row in list_quarantine():
+        ts = _parse_timestamp(row.get("timestamp", ""))
+        if ts is None or ts >= cutoff:
+            continue
+        # One unreadable item must not stop the rest of the purge.
+        try:
             p = Path(row["quarantine_path"])
-            if p.exists():
-                if p.is_dir():
-                    shutil.rmtree(p)
-                else:
-                    p.unlink()
+            if p.exists() or p.is_symlink():
+                _remove_path(p)
                 removed += 1
                 bytes_freed += row.get("size_bytes", 0)
             remove_quarantine_entry(row["quarantine_id"])
+        except Exception:
+            continue
     return removed, bytes_freed
+
+
+@dataclass
+class UndoOutcome:
+    """Result of undoing one run.
+
+    Attributes:
+        restored: Items restored by this call.
+        already_restored: Items restored by an earlier undo of the same run.
+        failed: ``(undo_token, reason)`` for items that could not be restored.
+        permanent: Items that were deleted without quarantine and cannot be restored.
+    """
+
+    restored: int = 0
+    already_restored: int = 0
+    failed: list[tuple[str, str]] = field(default_factory=list)
+    permanent: int = 0
+
+
+def undo_run_results(run_id: str, results: list[dict[str, Any]]) -> UndoOutcome:
+    """Restore every quarantined item of a run, skipping ones already restored.
+
+    Args:
+        run_id: Run identifier (used to record progress).
+        results: Parsed ``results_json`` of the run.
+
+    Returns:
+        Summary of what was restored, skipped and failed.
+    """
+    out = UndoOutcome()
+    for entry in results:
+        token = entry.get("undo_token")
+        if not token:
+            if entry.get("success") and entry.get("log") != "dry-run":
+                out.permanent += 1
+            continue
+        if entry.get("restored_at"):
+            out.already_restored += 1
+            continue
+        try:
+            restore_from_quarantine(token)
+        except Exception as exc:
+            out.failed.append((token, str(exc)))
+            continue
+        out.restored += 1
+        mark_undo_restored(run_id, token)
+    return out

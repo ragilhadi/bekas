@@ -26,7 +26,7 @@ def _patch_data_dir(monkeypatch):
     monkeypatch.setattr(cfg, "_data_dir", lambda: ddir)
     monkeypatch.setattr(cfg, "_config_dir", lambda: cdir)
 
-    _permissive = cfg.Profile(interactive=False, quarantine_enabled=False, enabled_plugins=["*"])
+    _permissive = cfg.Profile(interactive=False, quarantine_enabled=False, enabled_plugins=["*"], min_quiet_hours=0)
     _permissive_cfg = cfg.Config(active_profile="default", profiles={"default": _permissive})
     config_file = cdir / "config.yaml"
     config_file.write_text(cfg.DEFAULT_CONFIG)

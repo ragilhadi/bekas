@@ -23,6 +23,7 @@ class DownloadsPlugin(Plugin):
     """
 
     name = "downloads"
+    categories = ("downloads.file",)
     description = "Finds files in Downloads/ older than a threshold."
     requires_commands = []
     capabilities = Capabilities(quarantine=True, estimated_runtime="fast")

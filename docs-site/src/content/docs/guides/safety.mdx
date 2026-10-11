@@ -15,7 +15,7 @@ description: Confidence tiers, hard exclusions and the other protections that ke
 
 - **Read-only by default** — `audit` and `plan` never modify anything.
 - **Dry-run by default** — `clean` needs `--apply`.
-- **Hard exclusions** — system directories, `$HOME` itself, sensitive dotfiles, active virtualenvs and `.git` are never touched.
+- **Hard exclusions** — system directories, `/`, `$HOME` itself and any folder that contains one of your protected paths, sensitive dotfiles, symlinks that leave `$HOME`, active virtualenvs and `.git` are never touched.
 - **bekas's own data directory** is excluded, so quarantine contents are never cleaned by accident.
 - **Non-local filesystems** (NFS, SMB, FUSE) and **symlinks leaving `$HOME`** are skipped.
 - **Recently modified files** (within `min_quiet_hours`, default 6) are skipped.
@@ -30,4 +30,7 @@ The full list of exclusion rules is in [`docs/SAFETY.md`](https://github.com/rag
 exclude:
   - ~/code/keep-me
   - "*/important/*"
+  - node_modules/keep
 ```
+
+Patterns use gitignore-style matching: `*` stays inside one path segment, `**` crosses segments, a pattern without a leading `/` or `~/` matches at any depth, and excluding a directory also excludes everything inside it. Exclusions are checked again when a saved plan is applied, so adding one after `bekas plan --save` still protects that path.

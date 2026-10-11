@@ -12,6 +12,8 @@ import hmac
 import json
 import os
 import secrets
+import time
+from pathlib import Path
 from typing import Any
 
 from bekas.config import data_dir
@@ -27,12 +29,41 @@ def _get_or_create_key() -> bytes:
         32-byte signing key.
     """
     key_path = data_dir() / _KEY_FILE_NAME
-    if key_path.exists():
+    try:
         return key_path.read_bytes()
+    except FileNotFoundError:
+        pass
     key = secrets.token_bytes(_KEY_SIZE)
-    key_path.write_bytes(key)
-    os.chmod(key_path, 0o600)
+    # Create the file with owner-only permissions from the start (no window in
+    # which it is readable under the default umask). O_EXCL makes two racing
+    # processes agree on a single key: the loser reads the winner's.
+    try:
+        fd = os.open(key_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    except FileExistsError:
+        return _read_key_when_ready(key_path)
+    with os.fdopen(fd, "wb") as fh:
+        fh.write(key)
     return key
+
+
+def _read_key_when_ready(key_path: Path) -> bytes:
+    """Read a key another process is in the middle of creating.
+
+    Args:
+        key_path: Path of the key file.
+
+    Returns:
+        The full key once the writer has finished.
+
+    Raises:
+        OSError: If the key never becomes complete.
+    """
+    for _ in range(50):
+        data = key_path.read_bytes()
+        if len(data) == _KEY_SIZE:
+            return data
+        time.sleep(0.02)
+    raise OSError(f"signing key {key_path} is incomplete")
 
 
 def sign_plan(plan_data: dict[str, Any]) -> str:

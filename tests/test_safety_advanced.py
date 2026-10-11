@@ -60,14 +60,18 @@ def test_user_exclusion_glob():
 
 
 @pytest.mark.skipif(not _symlinks_available(), reason="symlink creation not permitted")
-def test_symlink_resolution_is_excluded(tmp_path: Path) -> None:
-    """Symlinks that resolve into excluded areas must be blocked."""
+def test_symlink_resolution_is_excluded(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Symlinks that resolve outside $HOME must be blocked."""
+    # Pin $HOME explicitly: on some CI runners the temp dir is inside the real home.
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
     secret = tmp_path / "real_secret"
     secret.mkdir()
-    symlink = tmp_path / "link_to_secret"
+    symlink = home / "link_to_secret"
     symlink.symlink_to(secret)
-    # The resolved path is under tmp_path, not a hard exclusion, so it passes
-    assert is_excluded(symlink) is False
+    assert is_excluded(symlink) is True
 
 
 def test_case_sensitivity_non_windows(tmp_path: Path) -> None:
