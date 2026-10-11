@@ -105,8 +105,9 @@ def test_undo_reports_permanent_deletions(runner):
         ),
     }
     with (
-        patch("bekas.database.get_run", return_value=run),
+        patch("bekas.cli.get_run", return_value=run),
         patch("bekas.quarantine.restore_from_quarantine"),
+        patch("bekas.quarantine.mark_undo_restored"),
     ):
         result = runner.invoke(cli, ["undo", "run_x"])
     assert "Restored 1 item(s)" in result.output

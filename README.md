@@ -85,7 +85,7 @@ bekas audit --serial           # Run plugins one at a time
 bekas audit --no-cache         # Skip the audit cache (full rescan)
 bekas audit --rebuild-cache    # Clear and rebuild the audit cache
 bekas audit --sort-by size     # Sort by reclaimable size
-bekas audit --top 20           # Only show top 20 candidates
+bekas audit --top 20           # List at most 20 candidates per plugin (totals unaffected)
 ```
 
 ### `bekas plan`
@@ -94,7 +94,7 @@ Runs a fresh audit (audits are not stored between commands) and converts it into
 
 ```bash
 bekas plan                     # Preview in human-readable format
-bekas plan --safe-only         # Only SAFE-tier items
+bekas plan --safe-only         # Only SAFE-tier items (this is the default)
 bekas plan --include-review    # Include REVIEW-tier items
 bekas plan --save plan.json    # Save a signed plan file
 ```
@@ -114,8 +114,8 @@ bekas clean --apply --plan-file plan.json    # Apply a signed plan
 Options:
 
 - `--apply` — Actually delete (default is dry-run).
-- `--safe-only` — Only include `SAFE`-tier candidates.
-- `--review` — Include `REVIEW`-tier candidates.
+- `--safe-only` — Only include `SAFE`-tier candidates. This is already the default; the flag makes it explicit and is rejected together with `--review`.
+- `--review` — Also include `REVIEW`-tier candidates. The typed confirmation still applies.
 - `--yes-all` — Skip all interactive prompts.
 - `--non-interactive` — Requires `--accept-categories`.
 - `--accept-categories` — Comma-separated category whitelist for non-interactive runs.
@@ -143,6 +143,8 @@ bekas history --since 720 --json  # JSON output
 bekas undo                     # Undo the most recent run
 bekas undo <run_id>            # Undo a specific run
 ```
+
+`undo` can be repeated safely (already-restored items are skipped) and exits non-zero if an item could not be restored.
 
 ### `bekas quarantine`
 

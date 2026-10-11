@@ -7,11 +7,11 @@ Global options: `--profile TEXT`, `--json`, `-v/--verbose`.
 
 ## bekas audit
 
-`--plugin`, `--serial`, `--sort-by [size|age|tier]`, `--top N`, `--no-cache`, `--rebuild-cache`. Read-only.
+`--plugin`, `--serial`, `--sort-by [size|age|tier]`, `--top N` (list at most N candidates per plugin; totals are unaffected), `--no-cache`, `--rebuild-cache`. Read-only.
 
 ## bekas plan
 
-`--safe-only`, `--include-review`, `--json`, `--save PATH`, `--top N`, `--no-cache`.
+`--safe-only`, `--include-review`, `--json`, `--save PATH`, `--top N` (list at most N candidates per category), `--no-cache`. `--safe-only` and `--include-review` cannot be combined.
 
 ## bekas clean
 
@@ -27,11 +27,11 @@ Global options: `--profile TEXT`, `--json`, `-v/--verbose`.
 
 ## bekas undo
 
-`bekas undo [RUN_ID]` — restore quarantined items and report items that were permanently deleted.
+`bekas undo [RUN_ID]` — restore quarantined items and report items that were permanently deleted. Safe to repeat; exits 1 if any item could not be restored, 3 if another bekas process holds the lock.
 
 ## bekas quarantine
 
-`list`, `restore <id>`, `purge`.
+`list`, `restore <id>`, `purge`. `restore` exits 1 on failure; `restore` and `purge` exit 3 if another bekas process holds the lock.
 
 ## bekas plugins
 
