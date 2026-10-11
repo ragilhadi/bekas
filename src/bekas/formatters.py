@@ -45,8 +45,9 @@ def format_human(
         report: Object to format.
         sort_by: Optional sort key for candidates inside reports and plans.
             One of ``"size"``, ``"age"``, ``"tier"``. Defaults to None (original order).
-        top: Optional limit on the number of candidates shown per category.
-            Defaults to None (show all).
+        top: Optional limit on the number of candidates listed per plugin (audit)
+            or per category (plan). Totals are never affected. Defaults to None
+            (list all).
 
     Returns:
         Multi-line human-readable string.
@@ -72,6 +73,9 @@ def format_human(
             for c in candidates:
                 flag = "~" if c.metadata.get("size_approximate") else " "
                 lines.append(f"    [{c.confidence.value:6s}] {flag}{c.id} — {_human_size(c.size_bytes)}")
+            hidden = len(pr.candidates) - len(candidates)
+            if hidden > 0:
+                lines.append(f"    ... and {hidden} more (omitted by --top)")
         lines.append("")
         failed = [pr for pr in report.plugins if pr.error]
         if failed:
@@ -87,16 +91,18 @@ def format_human(
 
     if isinstance(report, Plan):
         lines.append("Plan preview:")
-        candidates = _sort_and_limit(report.candidates, sort_by, top)
-        groups: dict[str, list[Candidate]] = {}
-        for c in candidates:
-            groups.setdefault(c.category, []).append(c)
-        for cat, items in groups.items():
-            size = sum(c.size_bytes for c in items)
-            lines.append(f"  {cat:30s} {len(items):3d} items   {_human_size(size)}")
-            for c in items:
+        # --top limits what is listed per category; the counts and sizes on each
+        # category line (and the total) always cover the whole plan.
+        for cat, all_items in report.by_category().items():
+            size = sum(c.size_bytes for c in all_items)
+            lines.append(f"  {cat:30s} {len(all_items):3d} items   {_human_size(size)}")
+            shown = _sort_and_limit(all_items, sort_by, top)
+            for c in shown:
                 flag = "~" if c.metadata.get("size_approximate") else " "
                 lines.append(f"    {flag}{c.id} [{c.confidence.value}] {_human_size(c.size_bytes)}")
+            hidden = len(all_items) - len(shown)
+            if hidden > 0:
+                lines.append(f"    ... and {hidden} more (omitted by --top)")
         lines.append(f"\nTotal: {_human_size(report.total_bytes())}")
         return "\n".join(lines)
 
