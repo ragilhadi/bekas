@@ -32,13 +32,13 @@ def test_plugin_properties():
     assert p.supports_quarantine() is False
 
 
-def _runtime(bundle_missing: bool = True, size: int = 1024):
+def _runtime(available: bool = False, size: int = 1024, bundle: str = "/nonexistent/bekas/iOS"):
     return {
         "identifier": "com.apple.CoreSimulator.SimRuntime.iOS-17-0",
         "name": "iOS 17.0",
         "version": "17.0",
-        "bundlePath": "/nonexistent/bekas/iOS" if bundle_missing else "/tmp",
-        "availability": "unavailable" if bundle_missing else "",
+        "bundlePath": bundle,
+        "availability": "" if available else "unavailable",
         "size_bytes": size,
     }
 
@@ -71,8 +71,10 @@ def test_discover_uses_size_estimate_when_missing(monkeypatch):
     assert candidates[0].size_bytes == 5 * 1024 * 1024 * 1024
 
 
-def test_discover_skips_available_runtimes(monkeypatch):
-    monkeypatch.setattr(subprocess, "run", lambda *a, **k: _mock_run(0, {"runtimes": [_runtime(bundle_missing=False)]}))
+def test_discover_skips_available_runtimes(monkeypatch, tmp_path):
+    real = _runtime(available=True, bundle=str(tmp_path))
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: _mock_run(0, {"runtimes": [real]}))
+    # A runtime whose bundlePath exists on the current OS must never be reported.
     assert _list_unavailable_runtimes() == []
 
 
