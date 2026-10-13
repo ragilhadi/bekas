@@ -67,7 +67,7 @@ class TuiApp(App):  # type: ignore[type-arg]
     def action_refresh(self) -> None:
         """Run a fresh audit in the background and repopulate the plugin tree."""
         self.query_one("#detail-label", Label).update("Running audit...")
-        self.run_worker(self._do_refresh, exclusive=True)
+        self.run_worker(self._do_refresh(), exclusive=True)
 
     async def _do_refresh(self) -> None:
         """Background worker that performs the audit without blocking the UI."""
@@ -110,7 +110,7 @@ class TuiApp(App):  # type: ignore[type-arg]
             return
 
         # Leaf nodes represent individual candidates
-        if event.node.is_leaf:
+        if not event.node.children:
             for pr in report.plugins:
                 for c in pr.candidates:
                     if label.startswith(c.id + " —"):

@@ -1,10 +1,10 @@
 [project]
 name = "bekas"
-version = "0.6.0"
 description = "A CLI utility that audits your local machine for stuff you forgot and helps you safely reclaim disk space."
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.11"
+dynamic = ["version"]
 dependencies = [
     "click>=8.0",
     "pydantic>=2.0",
@@ -21,6 +21,7 @@ dev = [
     "pytest-cov>=4.0",
     "mypy>=1.0",
     "ruff>=0.1.0",
+    "hypothesis>=6.0",
     "types-pyyaml",
     "types-psutil",
 ]
@@ -63,6 +64,9 @@ xcode_simulators = "bekas.plugins.xcode_simulators:XcodeSimulatorsPlugin"
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
+[tool.hatch.version]
+path = "src/bekas/__init__.py"
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/bekas"]
 
@@ -95,7 +99,7 @@ disable_error_code = ["import-untyped"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-q --cov=bekas --cov-report=term-missing --cov-fail-under=60"
+addopts = "-q --cov=bekas --cov-report=term-missing --cov-fail-under=85"
 
 [tool.coverage.run]
 source = ["src/bekas"]

@@ -2,6 +2,7 @@
 
 import time
 from pathlib import Path
+from unittest.mock import patch
 
 from bekas.models import Candidate, Confidence, Context, RemovalResult
 from bekas.plugins.python_venvs import PythonVenvsPlugin, _du, _find_venvs
@@ -76,6 +77,80 @@ def test_supports():
     p = PythonVenvsPlugin()
     assert p.supports_quarantine() is True
     assert p.supports_undo() is True
+
+
+def _make_candidate(path: Path) -> Candidate:
+    return Candidate(
+        id="venv:t",
+        category="python.venv",
+        size_bytes=8,
+        path_or_handle=str(path),
+        confidence=Confidence.SAFE,
+        reason="t",
+        metadata={"path": str(path)},
+    )
+
+
+def _boom(*args, **kwargs):
+    raise OSError("denied")
+
+
+def test_remove_deletes_venv(tmp_path, monkeypatch):
+    venv = tmp_path / "proj" / ".venv"
+    venv.mkdir(parents=True)
+    (venv / "bin").mkdir()
+    (venv / "bin" / "python").write_text("#!/bin/sh")
+
+    p = PythonVenvsPlugin()
+    ctx = Context(dry_run=False, config={})
+    result = p.remove(_make_candidate(venv), ctx)
+    assert result.success is True
+    assert result.bytes_freed > 0
+    assert not venv.exists()
+    assert result.log == "Deleted"
+
+
+def test_remove_failure_logged(tmp_path, monkeypatch):
+    venv = tmp_path / "proj" / ".venv"
+    venv.mkdir(parents=True)
+    (venv / "pyvenv.cfg").write_text("venv = Python")
+
+    p = PythonVenvsPlugin()
+    ctx = Context(dry_run=False, config={})
+    monkeypatch.setattr("shutil.rmtree", _boom)
+    result = p.remove(_make_candidate(venv), ctx)
+    assert result.success is False
+    assert result.bytes_freed == 0
+    assert venv.exists()
+
+
+def test_quarantine_moves_venv(tmp_path):
+    venv = tmp_path / "proj" / ".venv"
+    venv.mkdir(parents=True)
+    (venv / "pyvenv.cfg").write_text("venv = Python")
+
+    p = PythonVenvsPlugin()
+    ctx = Context(dry_run=False, config={})
+    result = p.quarantine(_make_candidate(venv), ctx, str(tmp_path), run_id="run_test")
+    assert result.success is True
+    assert result.bytes_freed > 0
+    assert result.undo_token
+    assert not venv.exists()
+    assert Path(result.undo_token).exists()
+
+
+def test_quarantine_exception(tmp_path, monkeypatch):
+    venv = tmp_path / "proj" / ".venv"
+    venv.mkdir(parents=True)
+    (venv / "pyvenv.cfg").write_text("venv = Python")
+
+    p = PythonVenvsPlugin()
+    ctx = Context(dry_run=False, config={})
+    with patch("bekas.quarantine.move_to_quarantine", side_effect=RuntimeError("boom")):
+        result = p.quarantine(_make_candidate(venv), ctx, str(tmp_path))
+    assert result.success is False
+    assert result.bytes_freed == 0
+    assert "boom" in result.log
 
 
 def test_du(tmp_path):

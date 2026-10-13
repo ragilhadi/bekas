@@ -9,7 +9,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-from bekas.config import runs_db_path
+from bekas.config import runs_db_path as runs_db_path
 from bekas.models import Candidate, Plan, RunResult
 
 

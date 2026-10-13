@@ -15,6 +15,7 @@ import platform
 import shutil
 import subprocess
 from collections.abc import Iterator
+from typing import Any
 
 from bekas.models import Candidate, Confidence, Context, RemovalResult
 from bekas.plugin import Capabilities, Plugin
@@ -134,7 +135,7 @@ class XcodeSimulatorsPlugin(Plugin):
         return False
 
 
-def _list_unavailable_runtimes() -> list[dict]:
+def _list_unavailable_runtimes() -> list[dict[str, Any]]:
     """List unavailable Xcode simulator runtime dicts.
 
     Uses ``xcrun simctl list runtimes --json`` to find runtimes whose
@@ -155,7 +156,7 @@ def _list_unavailable_runtimes() -> list[dict]:
         if result.returncode != 0:
             return []
         data = json.loads(result.stdout)
-        runtimes: list[dict] = []
+        runtimes: list[dict[str, Any]] = []
         # JSON shape: {"runtimes": [{"identifier": "...", "name": "...", ...}, ...]}
         for runtime in data.get("runtimes", []):
             availability = runtime.get("availability", "").lower()

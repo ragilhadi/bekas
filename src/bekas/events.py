@@ -97,7 +97,7 @@ def read_events(since_hours: int | None = None) -> list[dict[str, Any]]:
     files = [path]
     # Include rotated files
     rotated = sorted(glob.glob(str(path.with_suffix(".*.jsonl"))))
-    files.extend(rotated)
+    files.extend(Path(r) for r in rotated)
 
     events: list[dict[str, Any]] = []
     cutoff: datetime | None = None
