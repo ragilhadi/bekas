@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import yaml
 from platformdirs import user_config_dir, user_data_dir
@@ -318,7 +319,7 @@ def validate_config_file(path: Path | None = None) -> tuple[bool, str]:
         return False, f"Config load error: {exc}"
 
 
-def resolved_config(profile_name: str | None = None) -> dict:
+def resolved_config(profile_name: str | None = None) -> dict[str, Any]:
     """Return the effective config as a merged dictionary.
 
     Args:

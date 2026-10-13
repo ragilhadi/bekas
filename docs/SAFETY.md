@@ -56,8 +56,13 @@ Returns `(True, "")` if the path passes all exclusion rules, or
 
 ## Property-Based Testing
 
-The `tests/test_safety.py` property-based suite (using `hypothesis`) generates
-arbitrary paths and verifies that **no system path ever returns `(True, _)`**.
+The `tests/test_safety_property.py` property-based suite (using `hypothesis`)
+generates arbitrary paths and verifies that **no system or sensitive path ever
+returns `(True, _)`**: hard system exclusions hold at any depth, protected
+roots (`/`, `/home`, `/tmp`, ...), `$HOME`, sensitive directories (`.ssh`,
+`.gnupg`, `.aws`, `.kube`, `.git`) and files (`.netrc`, `*.key`, `*.pem`,
+`*.gpg`), traversal components (`..`), and explicit user exclusions are always
+excluded, and `is_excluded` stays consistent with `is_safe_to_delete`.
 
 ## Confidence Tiers
 

@@ -21,7 +21,6 @@ The site will be available at [http://localhost:4321](http://localhost:4321). Ed
 ├── Dockerfile                    # multi-stage build → nginx
 ├── docker-compose.yml
 ├── nginx.conf
-├── vars/version                  # image version read by CI (validated format: v1.2.3)
 ├── public/                       # Static assets (favicon, images)
 └── src/
     ├── content.config.ts         # Astro content collection config
@@ -103,7 +102,7 @@ docker compose pull && docker compose up -d
 
 ## CI
 
-`.github/workflows/docs.yml` (repo root) builds the site image on pushes to `master` touching `docs-site/**`, validates `vars/version` against `^v[0-9]+\.[0-9]+\.[0-9]+$`, tags the image with that version plus `latest`, and pushes to the private registry configured via repository secrets:
+`.github/workflows/docs.yml` (repo root) builds the site image on pushes to `master` touching `docs-site/**` or the package version (single source: `src/bekas/__init__.py`), validates it against `^v[0-9]+\.[0-9]+\.[0-9]+$`, tags the image with that version plus `latest`, and pushes to the private registry configured via repository secrets:
 
 | Secret | Purpose |
 |---|---|

@@ -78,7 +78,7 @@ def test_tui_on_tree_node_selected_leaf():
     mock_table = MagicMock()
     mock_label = MagicMock()
     mock_node = MagicMock()
-    mock_node.is_leaf = True
+    mock_node.children = []
     mock_node.label = "f:1 — 1.0 KB"
 
     def mock_query_one(selector, widget_type=None):
@@ -126,7 +126,7 @@ def test_tui_on_tree_node_selected_branch():
     mock_table = MagicMock()
     mock_label = MagicMock()
     mock_node = MagicMock()
-    mock_node.is_leaf = False
+    mock_node.children = [MagicMock()]
     mock_node.label = "fake.plugin (1)"
 
     def mock_query_one(selector, widget_type=None):

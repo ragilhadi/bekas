@@ -121,3 +121,6 @@ condaenv.t1e302om.requirements.txt
 # local IDE stuffs
 .idea/*
 .coverage
+
+# uv (untracked local lockfile)
+uv.lock

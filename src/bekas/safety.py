@@ -86,9 +86,13 @@ _PROTECTED_EXACT: list[str] = [
 ]
 
 _SENSITIVE_GLOBS: list[str] = [
+    "**/.ssh",
     "**/.ssh/*",
+    "**/.gnupg",
     "**/.gnupg/*",
+    "**/.aws",
     "**/.aws/*",
+    "**/.kube",
     "**/.kube/*",
     "**/.config/git/*",
     "**/.netrc",

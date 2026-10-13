@@ -80,8 +80,9 @@ class MavenRepoPlugin(Plugin):
         for artifact_dir, versions in _find_artifacts(repo):
             if len(versions) <= 2:
                 continue
-            # Keep the latest two; mark the rest as candidates
-            old_versions = versions[:-2]
+            # Keep the latest two; mark the rest as candidates.
+            # ``versions`` is sorted newest-first, so candidates start at index 2.
+            old_versions = versions[2:]
             for ver_dir in old_versions:
                 size = _du(ver_dir)
                 yield Candidate(

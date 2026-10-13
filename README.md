@@ -1,7 +1,7 @@
 # bekas
 
 [![CI](https://github.com/ragilhadi/bekas/actions/workflows/test.yml/badge.svg)](https://github.com/ragilhadi/bekas/actions/workflows/test.yml)
-[![Coverage](https://img.shields.io/badge/coverage-80%25-green)](https://github.com/ragilhadi/bekas)
+[![Codecov](https://codecov.io/gh/ragilhadi/bekas/branch/master/graph/badge.svg)](https://codecov.io/gh/ragilhadi/bekas)
 [![PyPI](https://img.shields.io/pypi/v/bekas)](https://pypi.org/project/bekas/)
 [![Python](https://img.shields.io/pypi/pyversions/bekas)](https://pypi.org/project/bekas/)
 [![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)

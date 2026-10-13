@@ -337,7 +337,7 @@ def apply_plan(
     """
     _ = audit  # reserved for future use
     profile = profile_for(profile_name)
-    profile_dict = profile.model_dump() if hasattr(profile, "model_dump") else profile
+    profile_dict = profile.model_dump()
     quarantine_enabled = quarantine_enabled or profile_dict.get("quarantine_enabled", False)
     retention = profile_dict.get("quarantine_retention_days", 30)
 
