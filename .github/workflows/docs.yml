@@ -4,8 +4,7 @@ on:
   push:
     branches: [master]
     paths:
-      - "src/bekas/__init__.py"
-      - "docs-site/**"
+      - "docs-site/vars/version"
       - ".github/workflows/docs.yml"
   pull_request:
     branches: [master]
@@ -27,15 +26,14 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Read version from package
+      - name: Read version from file
         id: version
         run: |
-          VERSION=$(grep -oP '__version__ = "\K[^"]+' src/bekas/__init__.py)
-          if [ -z "$VERSION" ]; then
-            echo "Error: could not read version from src/bekas/__init__.py"
+          if [ ! -f docs-site/vars/version ]; then
+            echo "Error: docs-site/vars/version file not found"
             exit 1
           fi
-          VERSION="v$VERSION"
+          VERSION=$(cat docs-site/vars/version)
           if [[ ! $VERSION =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             echo "Error: Invalid version format. Expected format: v1.0.0"
             echo "Current version: $VERSION"
