@@ -35,6 +35,10 @@ class Profile(BaseModel):
         git_repos: List of git repository paths to scan.
         min_quiet_hours: Minimum hours since last modification.
         plugin_timeout_seconds: Hard timeout per plugin during audit.
+        safety_threshold: Highest confidence tier this profile may act on.
+        interactive: Whether prompts can be shown.
+        allow_manual: Whether MANUAL-tier candidates may be cleaned at all
+            (the typed high-risk token is still required on top).
     """
 
     enabled_plugins: list[str] = ["*"]
@@ -46,6 +50,7 @@ class Profile(BaseModel):
     plugin_timeout_seconds: int = 60
     safety_threshold: str = "safe"
     interactive: bool = True
+    allow_manual: bool = False
 
 
 class Config(BaseModel):
@@ -114,6 +119,7 @@ profiles:
   default:
     safety_threshold: safe
     interactive: true
+    allow_manual: false
     quarantine_enabled: true
     quarantine_retention_days: 30
     enabled_plugins:

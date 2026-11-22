@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import platform
 import shutil
 import threading
@@ -18,6 +19,8 @@ from bekas.fsmeasure import measure_path
 from bekas.models import AuditReport, AuditSummary, Candidate, Confidence, Context, PluginReport, SystemInfo
 from bekas.plugin import Plugin
 from bekas.safety import filter_candidates
+
+logger = logging.getLogger(__name__)
 
 
 def _fingerprint(path: str) -> str:
@@ -73,7 +76,12 @@ def _cached_discover(plugin: Plugin, ctx: Context, no_cache: bool = False) -> li
                         candidates.append(cached_candidate)
                         continue
                     except Exception:
-                        pass
+                        logger.debug(
+                            "audit cache: failed to rehydrate candidate for %s from %s; rescanning",
+                            plugin.name,
+                            path,
+                            exc_info=True,
+                        )
                 set_audit_cache(plugin.name, path, fp, c, conn=conn)
             candidates.append(c)
         conn.commit()

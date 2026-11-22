@@ -328,6 +328,12 @@ def _load_plan_file(plan_file: str, allow_unsigned: bool) -> Plan:
 @click.option("--plan-file", type=click.Path(exists=True), default=None, help="Apply a saved JSON plan file.")
 @click.option("--force-stale", is_flag=True, help="Apply a plan even if candidates have drifted.")
 @click.option("--allow-unsigned", is_flag=True, help="Accept a --plan-file that carries no signature.")
+@click.option(
+    "--allow-manual",
+    is_flag=True,
+    default=None,
+    help="Allow MANUAL-tier candidates. Default: profile allow_manual setting.",
+)
 @click.pass_context
 def clean_cmd(
     ctx: click.Context,
@@ -340,6 +346,7 @@ def clean_cmd(
     plan_file: str | None,
     force_stale: bool,
     allow_unsigned: bool,
+    allow_manual: bool | None,
 ) -> None:
     """Remove approved candidates. Dry-run by default."""
     _check_tier_flags(safe_only, include_review)
@@ -377,6 +384,7 @@ def clean_cmd(
 
     ctx_obj = Context(dry_run=False, config=profile.model_dump(), verbose=ctx.obj.get("verbose", False))
     quarantine_enabled = profile.quarantine_enabled
+    manual_allowed = allow_manual if allow_manual is not None else profile.allow_manual
 
     # Acquire single-instance lock for mutating commands
     try:
@@ -391,6 +399,7 @@ def clean_cmd(
                 profile_name=profile_name,
                 non_interactive=non_interactive,
                 force_stale=force_stale,
+                allow_manual=manual_allowed,
             )
     except AlreadyRunningError as exc:
         click.echo(str(exc))
@@ -607,9 +616,41 @@ def plugins_disable(ctx: click.Context, plugin_name: str) -> None:
 @cli.command("doctor")
 @click.option("--json", "json_output", is_flag=True, help="Output JSON.")
 @click.option("--skip", default=None, help="Comma-separated checks to skip.")
-def doctor_cmd(json_output: bool, skip: str | None) -> None:
+@click.option(
+    "--fix",
+    is_flag=True,
+    help="Repair what is safe to repair: recreate missing data dirs, tighten permissions, drop corrupt run rows.",
+)
+@click.option("--dry-run", is_flag=True, help="With --fix: list what would change without changing anything.")
+def doctor_cmd(json_output: bool, skip: str | None, fix: bool, dry_run: bool) -> None:
     """Diagnose the bekas runtime environment."""
-    from bekas.doctor import exit_code, format_human, format_json, run_checks
+    from bekas.doctor import collect_fixes, exit_code, format_human, format_json, run_checks
+
+    if fix:
+        actions, problems = collect_fixes(dry_run=dry_run)
+        if json_output:
+            click.echo(
+                json.dumps(
+                    {
+                        "dry_run": dry_run,
+                        "actions": [{"name": a.name, "detail": a.detail} for a in actions],
+                        "problems": problems,
+                    },
+                    indent=2,
+                )
+            )
+        else:
+            click.echo("bekas doctor --fix" + (" (dry run)" if dry_run else ""))
+            if actions:
+                for a in actions:
+                    click.echo(f"  + {a.name}: {a.detail}")
+            else:
+                click.echo("  Nothing to fix.")
+            if problems:
+                click.echo("  Problems found:")
+                for p in problems:
+                    click.echo(f"  ⚠ {p}")
+        return
 
     skip_list = [s.strip() for s in (skip or "").split(",") if s.strip()]
     results = run_checks(skip=skip_list)

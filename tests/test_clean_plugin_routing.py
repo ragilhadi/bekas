@@ -106,7 +106,7 @@ def test_closed_stdin_aborts_gate(monkeypatch, risky):
         raise EOFError
 
     monkeypatch.setattr("builtins.input", _eof)
-    assert typed_confirmation_gate(plan, quarantine_enabled=True) is False
+    assert typed_confirmation_gate(plan, quarantine_enabled=True, allow_manual=True) is False
 
 
 def test_cli_clean_exits_nonzero_when_aborted(monkeypatch):

@@ -72,6 +72,20 @@ Every candidate is assigned a confidence tier:
 - **REVIEW** — May affect active workflows; requires user review (e.g., node_modules in a recently-touched project).
 - **MANUAL** — High risk; only removed with explicit opt-in (e.g., browser caches, quarantined items older than retention).
 
+MANUAL-tier candidates are double-gated: `clean` refuses any plan containing
+them unless `--allow-manual` is passed (or `allow_manual: true` is set in the
+active profile), and the typed high-risk token confirmation is still required
+on top.
+
+## Protected credential paths (opt-out only via user exclusions)
+
+Never touched regardless of tier — matching any path component:
+
+- Secret files: `.env`, `.env.*`, `.npmrc`, `.pypirc`, `.netrc`, `*.key`, `*.pem`, `*.gpg`
+- Key material: `id_rsa`, `id_ed25519`, `id_ecdsa` (with or without `.pub`)
+- Credential stores: `~/.ssh/**`, `~/.gnupg/**`, `~/.aws/**`, `~/.kube/**`, `~/.docker/config.json`, `~/.config/gh/**`, `~/.password-store/**`, `gh/config` dirs
+- OS/browser secrets: `Library/Keychains`, `Login Data`, `Cookies`, `cookies.sqlite`
+
 ## Reporting Safety Issues
 
 If you believe a safety rule is missing or incorrect, please open an issue

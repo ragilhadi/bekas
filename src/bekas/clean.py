@@ -242,6 +242,7 @@ def typed_confirmation_gate(
     quarantine_enabled: bool,
     yes_all: bool = False,
     non_interactive: bool = False,
+    allow_manual: bool = False,
 ) -> bool:
     """Show a summary and require typed user confirmation before destructive action.
 
@@ -253,10 +254,26 @@ def typed_confirmation_gate(
         quarantine_enabled: Whether quarantine is active.
         yes_all: If True, skip the gate entirely.
         non_interactive: If True and ``yes_all`` is False, exit without changes.
+        allow_manual: If False (default), the gate refuses ``MANUAL``-tier
+            candidates before any prompt is shown.
 
     Returns:
         True if the user confirmed, False otherwise (including closed stdin).
+
+    Raises:
+        CleanAborted: When the plan contains ``MANUAL``-tier candidates and
+            ``allow_manual`` is False.
     """
+    if not allow_manual:
+        manual = [c for c in plan.candidates if c.confidence == Confidence.MANUAL]
+        if manual:
+            raise CleanAborted(
+                f"Error: plan contains {len(manual)} MANUAL-tier candidate(s) "
+                f"({', '.join(sorted({c.category for c in manual}))}). "
+                "Re-run with --allow-manual to include them.",
+                exit_code=2,
+            )
+
     if yes_all:
         return True
 
@@ -314,6 +331,7 @@ def apply_plan(
     profile_name: str | None = None,
     non_interactive: bool = False,
     force_stale: bool = False,
+    allow_manual: bool = False,
 ) -> RunResult:
     """Apply a cleanup plan and return the run result.
 
@@ -331,6 +349,8 @@ def apply_plan(
         profile_name: Optional profile name to load settings from.
         non_interactive: If True, requires ``yes_all`` or exits.
         force_stale: If True, apply even if plan candidates have drifted.
+        allow_manual: If False (default), MANUAL-tier candidates abort the run
+            before any change is made.
 
     Returns:
         RunResult summarizing the operation.
@@ -360,7 +380,9 @@ def apply_plan(
     if not ctx.dry_run:
         if non_interactive and not yes_all:
             raise CleanAborted("Error: --non-interactive requires --yes-all.", exit_code=2)
-        confirmed = typed_confirmation_gate(plan, quarantine_enabled, yes_all=yes_all, non_interactive=non_interactive)
+        confirmed = typed_confirmation_gate(
+            plan, quarantine_enabled, yes_all=yes_all, non_interactive=non_interactive, allow_manual=allow_manual
+        )
         if not confirmed:
             raise CleanAborted("Aborted. No changes were made.", exit_code=1)
 

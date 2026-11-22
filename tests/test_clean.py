@@ -6,7 +6,10 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
 from bekas.clean import (
+    CleanAborted,
     _find_plugin,
     _generic_remove,
     _group_by_category,
@@ -178,7 +181,7 @@ def test_confirmation_gate_non_interactive_refuses():
 
 
 def test_confirmation_gate_high_risk_requires_token(monkeypatch):
-    """Manual-tier triggers token requirement."""
+    """Manual-tier requires --allow-manual on top of the typed token."""
     c = Candidate(id="x", category="c", size_bytes=100, path_or_handle="/x", confidence=Confidence.MANUAL, reason="")
     plan = Plan(audit_id="ad", candidates=[c])
 
@@ -191,7 +194,28 @@ def test_confirmation_gate_high_risk_requires_token(monkeypatch):
     orig_token = clean_mod.secrets.token_urlsafe
     clean_mod.secrets.token_urlsafe = lambda n: "ABCD"
     try:
-        assert typed_confirmation_gate(plan, quarantine_enabled=True) is True
+        assert typed_confirmation_gate(plan, quarantine_enabled=True, allow_manual=True) is True
+    finally:
+        clean_mod.secrets.token_urlsafe = orig_token
+
+
+def test_confirmation_gate_manual_requires_allow_manual(monkeypatch):
+    """Manual-tier candidates are refused unless explicitly allowed."""
+    c = Candidate(id="x", category="c", size_bytes=100, path_or_handle="/x", confidence=Confidence.MANUAL, reason="")
+    plan = Plan(audit_id="ad", candidates=[c])
+    with pytest.raises(CleanAborted):
+        typed_confirmation_gate(plan, quarantine_enabled=True)
+
+    def _fake_input(prompt=""):
+        return "ABCD"
+
+    import bekas.clean as clean_mod
+
+    orig_token = clean_mod.secrets.token_urlsafe
+    clean_mod.secrets.token_urlsafe = lambda n: "ABCD"
+    monkeypatch.setattr("builtins.input", _fake_input)
+    try:
+        assert typed_confirmation_gate(plan, quarantine_enabled=True, allow_manual=True) is True
     finally:
         clean_mod.secrets.token_urlsafe = orig_token
 
