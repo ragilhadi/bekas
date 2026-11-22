@@ -84,25 +84,6 @@ def _parse_filter_arg(raw: str, parser: Callable[[str], int]) -> int:
         raise click.BadParameter(str(exc)) from exc
 
 
-def _send_desktop_notification(message: str) -> None:
-    """Best-effort desktop notification; silently skips where unsupported.
-
-    Args:
-        message: One-line summary to display.
-    """
-    import shutil
-    import subprocess
-
-    if sys.platform == "darwin" and shutil.which("osascript"):
-        with contextlib.suppress(Exception):
-            subprocess.run(
-                ["osascript", "-e", f'display notification "{message}" with title "bekas"'], timeout=3, check=False
-            )
-    elif shutil.which("notify-send"):
-        with contextlib.suppress(Exception):
-            subprocess.run(["notify-send", "bekas", message], timeout=3, check=False)
-
-
 def _load_audit_ref(ref: str | None) -> AuditReport:
     """Resolve a ``--from-audit`` reference to a stored report.
 
@@ -261,13 +242,6 @@ def cli(ctx: click.Context, profile: str | None, json_output: bool, verbose: boo
     default=None,
     help="Output format (default: table).",
 )
-@click.option("--notify", is_flag=True, help="Send a desktop notification with the reclaimable total.")
-@click.option(
-    "--exit-code-above",
-    type=str,
-    default=None,
-    help="Exit with code 4 when reclaimable space exceeds this size (e.g. 5GB).",
-)
 @click.pass_context
 def audit_cmd(
     ctx: click.Context,
@@ -281,8 +255,6 @@ def audit_cmd(
     min_size: str | None,
     older_than: str | None,
     fmt: str | None,
-    notify: bool,
-    exit_code_above: str | None,
 ) -> None:
     """Run a read-only audit."""
     profile_name = ctx.obj.get("profile")
@@ -319,23 +291,6 @@ def audit_cmd(
     if save_name is not None:
         save_audit(report, name=save_name or None)
         click.echo(f"Audit saved: {report.audit_id}" + (f" (name: {save_name})" if save_name else ""))
-
-    total_bytes = sum(c.size_bytes for pr in report.plugins for c in pr.candidates)
-
-    if notify:
-        _send_desktop_notification(f"bekas audit: {_human_size(total_bytes)} reclaimable")
-
-    if exit_code_above:
-        try:
-            threshold = parse_size(exit_code_above)
-        except ValueError as exc:
-            raise click.BadParameter(str(exc)) from exc
-        if total_bytes > threshold:
-            click.echo(
-                f"Reclaimable {_human_size(total_bytes)} exceeds threshold {_human_size(threshold)}.",
-                err=True,
-            )
-            sys.exit(4)
 
     # Save report in context for chaining if needed
     ctx.obj["last_audit"] = report
@@ -878,119 +833,6 @@ def quarantine_purge() -> None:
 def plugins_group() -> None:
     """Manage plugins."""
     pass
-
-
-@plugins_group.command("new")
-@click.argument("name")
-@click.option("--target", type=click.Path(file_okay=False), default=".", help="Directory to scaffold the package in.")
-def plugins_new(name: str, target: str) -> None:
-    """Scaffold a third-party plugin package (bundled plugin SDK)."""
-    from bekas.pluginsdk import API_VERSION, scaffold_plugin
-
-    try:
-        pkg_dir = scaffold_plugin(name, Path(target))
-    except ValueError as exc:
-        click.echo(f"Error: {exc}")
-        sys.exit(1)
-    click.echo(f"Plugin package scaffolded in {pkg_dir}")
-    click.echo("Next steps:")
-    click.echo("  1. edit the discover()/remove() logic in the generated plugin module")
-    click.echo("  2. pip install -e " + str(pkg_dir))
-    click.echo("  3. bekas plugins list  → verify the plugin appears")
-    click.echo(f"Plugins declare __bekas_api_version__ = {API_VERSION}; mismatched versions refuse to load.")
-
-
-@cli.group("completion")
-def completion_group() -> None:
-    """Print shell completion scripts."""
-
-
-_BASH_COMPLETION = """# bash completion for bekas
-_bekas_completion() {
-    local cur="${COMP_WORDS[COMP_CWORD]}"
-    local cmds="audit plan clean inspect history undo quarantine plugins doctor config tui completion version"
-    local opts="--apply --safe-only --include-review --review --yes-all --non-interactive \
---accept-categories --plan-file --force-stale --allow-unsigned --allow-manual --interactive \
---from-audit --min-size --older-than --format --save --diff --json --verbose --serial \
---sort-by --top --no-cache --rebuild-cache --plugin --list --item --skip --fix --dry-run \
---notify --exit-code-above --target"
-    case "$cur" in
-        --*) COMPREPLY=( $(compgen -W "$opts" -- "$cur") ) ;;
-        *)   COMPREPLY=( $(compgen -W "$cmds" -- "$cur") ) ;;
-    esac
-}
-complete -F _bekas_completion -o default bekas
-"""
-
-_ZSH_COMPLETION = """#compdef bekas
-# zsh completion for bekas
-_bekas() {
-    local -a cmds opts
-    cmds=(audit plan clean inspect history undo quarantine plugins doctor config tui completion version)
-    opts=(--apply --safe-only --include-review --review --yes-all --non-interactive \
---accept-categories --plan-file --force-stale --allow-unsigned --allow-manual --interactive \
---from-audit --min-size --older-than --format --save --diff --json --verbose --serial \
---sort-by --top --no-cache --rebuild-cache --plugin --list --item --skip --fix --dry-run \
---notify --exit-code-above --target)
-    if [[ "$CURRENT" -ge 2 && "${words[2]}" != -* ]]; then
-        _describe 'command' cmds
-    else
-        _describe 'option' opts
-    fi
-}
-compdef _bekas bekas
-"""
-
-_FISH_COMPLETION = """# fish completion for bekas
-complete -c bekas -f
-complete -c bekas -n "__fish_use_subcommand" -a "audit plan clean inspect history undo quarantine \\
-plugins doctor config tui completion version"
-complete -c bekas -l apply -d "Actually delete"
-complete -c bekas -l safe-only -d "Only SAFE-tier items"
-complete -c bekas -l include-review -d "Include REVIEW-tier items"
-complete -c bekas -l yes-all -d "Skip prompts"
-complete -c bekas -l non-interactive -d "Non-interactive mode"
-complete -c bekas -l accept-categories -d "Category whitelist" -x
-complete -c bekas -l plan-file -d "Saved plan file" -r
-complete -c bekas -l allow-manual -d "Allow MANUAL-tier candidates"
-complete -c bekas -l interactive -d "Pick candidates one by one"
-complete -c bekas -l from-audit -d "Reuse saved audit" -x
-complete -c bekas -l min-size -d "Minimum size" -x
-complete -c bekas -l older-than -d "Minimum age" -x
-complete -c bekas -l format -d "Output format" -x
-complete -c bekas -l save -d "Persist audit/plan" -x
-complete -c bekas -l diff -d "Diff vs saved plan" -r
-complete -c bekas -l json -d "JSON output"
-complete -c bekas -l verbose -d "Verbose output"
-complete -c bekas -l notify -d "Send desktop notification"
-complete -c bekas -l exit-code-above -d "Exit non-zero above size threshold" -x
-"""
-
-
-@completion_group.command("bash")
-def completion_bash() -> None:
-    """Bash completion script (source it: source <(bekas completion bash))."""
-    click.echo(_BASH_COMPLETION)
-
-
-@completion_group.command("zsh")
-def completion_zsh() -> None:
-    """Zsh completion script (add to fpath)."""
-    click.echo(_ZSH_COMPLETION)
-
-
-@completion_group.command("fish")
-def completion_fish() -> None:
-    """Fish completion script."""
-    click.echo(_FISH_COMPLETION)
-
-
-@cli.command("version")
-def version_cmd() -> None:
-    """Print the bekas version."""
-    from bekas import __version__
-
-    click.echo(f"bekas {__version__}")
 
 
 @plugins_group.command("list")
