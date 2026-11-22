@@ -42,6 +42,7 @@ export default defineConfig({
           items: [
             { label: 'Auditing', slug: 'guides/auditing' },
             { label: 'Planning & Cleaning', slug: 'guides/cleaning' },
+            { label: 'Saved Audits & Formats', slug: 'guides/persisted-audits' },
             { label: 'Quarantine, History & Undo', slug: 'guides/quarantine-undo' },
             { label: 'Safety Model', slug: 'guides/safety' },
             { label: 'Configuration', slug: 'guides/configuration' },
