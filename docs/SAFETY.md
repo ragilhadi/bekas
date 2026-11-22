@@ -77,6 +77,19 @@ them unless `--allow-manual` is passed (or `allow_manual: true` is set in the
 active profile), and the typed high-risk token confirmation is still required
 on top.
 
+## Undo
+
+- Quarantined items are restored by moving them back; `bekas undo <run_id> --list`
+  shows per-item state (`restorable`, `restored`, `permanent`, `missing`, `dry-run`).
+- `bekas undo <run_id> --item <candidate_id>` restores a single candidate; it is
+  idempotent — re-restoring an already-restored item never duplicates anything.
+- Beyond quarantine: plugins may implement undo for non-file removals. The
+  `git.branches` plugin records the branch SHA at discovery; `undo` recreates a
+  deleted branch from that SHA while the commit is still reachable. The
+  `plugins list` table shows an **Undo** column stating support honestly.
+- `bekas history <run_id> --report <file.md>` exports per-item markdown of what
+  was removed, restored and freed.
+
 ## Protected credential paths (opt-out only via user exclusions)
 
 Never touched regardless of tier — matching any path component:

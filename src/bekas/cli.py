@@ -8,6 +8,7 @@ import sys
 from collections.abc import Iterator
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 import click
 
@@ -26,9 +27,16 @@ from bekas.database import get_run, list_quarantine, list_runs
 from bekas.events import read_events
 from bekas.formatters import format_human, format_json
 from bekas.locking import AlreadyRunningError, ProcessLock
-from bekas.models import AuditReport, Confidence, Context, Plan
+from bekas.models import AuditReport, Candidate, Confidence, Context, Plan
 from bekas.plugin import Plugin, discover_plugins
-from bekas.quarantine import purge_old_quarantine, restore_from_quarantine, undo_run_results
+from bekas.quarantine import (
+    UndoOutcome,
+    purge_old_quarantine,
+    restore_from_quarantine,
+    undo_item_ids,
+    undo_run_item,
+    undo_run_results,
+)
 from bekas.runner import run_audit
 from bekas.signing import sign_plan, verify_plan
 
@@ -442,19 +450,29 @@ def inspect_cmd(ctx: click.Context, candidate_id: str) -> None:
 @click.argument("run_id", required=False)
 @click.option("--since", type=int, default=None, help="Only show events from the last N hours.")
 @click.option("--json", "json_output", is_flag=True, help="Output JSON.")
+@click.option("--report", type=click.Path(writable=True), default=None, help="Write a markdown report of a run.")
 @click.pass_context
-def history_cmd(ctx: click.Context, run_id: str | None, since: int | None, json_output: bool) -> None:
+def history_cmd(
+    ctx: click.Context, run_id: str | None, since: int | None, json_output: bool, report: str | None
+) -> None:
     """List past actions or show details of a specific run."""
     if run_id:
         run = get_run(run_id)
         if not run:
             click.echo(f"Run {run_id} not found.")
             return
+        if report:
+            path = _write_run_report(run, report)
+            click.echo(f"Report written to {path}")
+            return
         click.echo(f"Run {run['run_id']} at {run['timestamp']}")
         click.echo(f"Audit ID: {run['audit_id']}")
         click.echo(f"Total freed: {_human_size(run['total_bytes_freed'])}")
         return
 
+    if report:
+        click.echo("Error: --report requires a RUN_ID.")
+        sys.exit(2)
     events = read_events(since_hours=since)
     if not events:
         click.echo("No history yet.")
@@ -474,15 +492,57 @@ def history_cmd(ctx: click.Context, run_id: str | None, since: int | None, json_
 
 @cli.command("undo")
 @click.argument("run_id", required=False)
+@click.option("--list", "list_items", is_flag=True, help="List the items of a run with their undo state.")
+@click.option("--item", "item_id", default=None, help="Restore only this candidate id from the run.")
 @click.pass_context
-def undo_cmd(ctx: click.Context, run_id: str | None) -> None:
-    """Undo the last apply or a specific run."""
+def undo_cmd(ctx: click.Context, run_id: str | None, list_items: bool, item_id: str | None) -> None:
+    """Undo the last apply or a specific run (optionally a single item)."""
     if not run_id:
         runs = list_runs()
         if not runs:
             click.echo("No runs to undo.")
             return
         run_id = runs[0]["run_id"]
+
+    if list_items:
+        rows = undo_item_ids(run_id)
+        if not rows:
+            click.echo(f"Run {run_id} not found or has no items.")
+            return
+        click.echo(f"{'Candidate':34s} {'Category':26s} {'Size':>10s} {'State':10s}")
+        for row in rows:
+            click.echo(
+                f"{str(row['candidate_id']):34s} {str(row['category']):26s} "
+                f"{_human_size(int(row['size_bytes'])):>10s} {row['state']:10s}"
+            )
+        return
+
+    if item_id:
+        run = get_run(run_id)
+        if not run:
+            click.echo(f"Run {run_id} not found.")
+            return
+        try:
+            run_results = json.loads(run["results_json"])
+        except Exception:
+            click.echo("Could not parse run results.")
+            return
+        if item_id not in {e.get("candidate_id") for e in run_results}:
+            click.echo(f"Candidate {item_id} is not part of run {run_id}. See `bekas undo {run_id} --list`.")
+            sys.exit(2)
+        plan_candidates = _load_plan_candidates(run)
+        click.echo(f"Undo item {item_id} of run {run_id}...")
+        with _exclusive():
+            fresh = get_run(run_id)
+            outcome = undo_run_item(
+                run_id,
+                json.loads(fresh["results_json"]) if fresh else run_results,
+                item_id,
+                candidates=plan_candidates,
+                plugins=_get_plugins(),
+            )
+        _echo_undo_outcome(outcome)
+        return
 
     run = get_run(run_id)
     if not run:
@@ -495,14 +555,88 @@ def undo_cmd(ctx: click.Context, run_id: str | None) -> None:
         click.echo("Could not parse run results.")
         return
 
+    plan_candidates = _load_plan_candidates(run)
     click.echo(f"Undo run {run_id}...")
     with _exclusive():
         # Re-read under the lock: a concurrent undo may have restored items meanwhile.
         fresh = get_run(run_id)
         if fresh:
             results = json.loads(fresh["results_json"])
-        outcome = undo_run_results(run_id, results)
+        outcome = undo_run_results(run_id, results, candidates=plan_candidates, plugins=_get_plugins())
+    _echo_undo_outcome(outcome)
 
+
+def _load_plan_candidates(run: dict[str, Any]) -> list[Candidate]:
+    """Parse the plan candidates stored with a run, for plugin-based undo."""
+    try:
+        plan_data = json.loads(run.get("plan_json") or "{}")
+        return Plan(
+            **{"audit_id": plan_data.get("audit_id", ""), "candidates": plan_data.get("candidates", [])}
+        ).candidates
+    except (ValueError, TypeError):
+        return []
+
+
+def _write_run_report(run: dict[str, Any], report_path: str) -> Path:
+    """Write a human-readable markdown report of one run.
+
+    Args:
+        run: Run row from the runs database.
+        report_path: Destination file for the markdown.
+
+    Returns:
+        The path written.
+    """
+    candidates = {c.id: c for c in _load_plan_candidates(run)}
+    try:
+        results = json.loads(run["results_json"])
+    except (ValueError, TypeError):
+        results = []
+    outcome = undo_item_ids(run["run_id"])
+    state_by_id = {row["candidate_id"]: row["state"] for row in outcome}
+
+    lines: list[str] = [
+        f"# bekas run {run['run_id']}",
+        "",
+        f"- Timestamp: {run['timestamp']}",
+        f"- Audit ID: `{run['audit_id']}`",
+        f"- Total freed: {_human_size(run['total_bytes_freed'])}",
+        "",
+        "## Items",
+        "",
+        "| Candidate | Category | Size | State | Reason |",
+        "|---|---|---:|---|---|",
+    ]
+    for entry in results:
+        cid = entry.get("candidate_id", "")
+        c = candidates.get(cid)
+        name = c.path_or_handle if c else cid
+        category = c.category if c else (entry.get("log") or "?")
+        reason = ""
+        if c is not None:
+            reason = (c.reason or "").replace("|", "\\|")
+        lines.append(
+            f"| `{name}` | {category} | {_human_size(entry.get('bytes_freed', 0))} | "
+            f"{state_by_id.get(cid, 'unknown')} | {reason} |"
+        )
+    restored = sum(1 for row in outcome if row["state"] == "restored")
+    lines += [
+        "",
+        "## Summary",
+        "",
+        f"- Candidates acted on: {len(results)}",
+        f"- Restored by a later undo: {restored}",
+        f"- Deleted permanently: {sum(1 for s in state_by_id.values() if s == 'permanent')}",
+        f"- Still restorable: {sum(1 for s in state_by_id.values() if s == 'restorable')}",
+        "",
+    ]
+    path = Path(report_path)
+    path.write_text("\n".join(lines))
+    return path
+
+
+def _echo_undo_outcome(outcome: UndoOutcome) -> None:
+    """Print an undo summary and exit non-zero on any failure."""
     for token, reason in outcome.failed:
         click.echo(f"  Failed to restore {token}: {reason}")
     if outcome.restored == 0 and not outcome.failed and not outcome.already_restored:
@@ -573,13 +707,14 @@ def plugins_list(ctx: click.Context) -> None:
     profile = profile_for(profile_name)
     patterns = profile.enabled_plugins
     all_plugins = _get_plugins()
-    click.echo(f"{'Plugin':30s} {'Available':10s} {'Enabled':10s} {'Quar':6s} {'Runtime':8s}")
+    click.echo(f"{'Plugin':30s} {'Available':10s} {'Enabled':10s} {'Quar':6s} {'Undo':6s} {'Runtime':8s}")
     for p in all_plugins:
         avail = "yes" if p.is_available(Context(dry_run=True, config=profile.model_dump())) else "no"
         enabled = "yes" if is_plugin_enabled(patterns, p.name) else "no"
         quar = "yes" if p.capabilities.quarantine else "no"
+        undo = "yes" if p.supports_undo() else "no"
         runtime = p.capabilities.estimated_runtime
-        click.echo(f"{p.name:30s} {avail:10s} {enabled:10s} {quar:6s} {runtime:8s}")
+        click.echo(f"{p.name:30s} {avail:10s} {enabled:10s} {quar:6s} {undo:6s} {runtime:8s}")
         click.echo(f"  {p.description}")
         if p.capabilities.requires_cli:
             click.echo(f"  requires: {', '.join(p.capabilities.requires_cli)}")
