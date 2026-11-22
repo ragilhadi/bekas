@@ -5,14 +5,14 @@ from __future__ import annotations
 import contextlib
 import json
 import sys
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 import click
 
-from bekas.clean import CleanAborted, apply_plan, fingerprint_plan
+from bekas.clean import CleanAborted, apply_plan, diff_plans, fingerprint_plan, select_interactive
 from bekas.config import (
     config_path,
     data_dir,
@@ -23,8 +23,9 @@ from bekas.config import (
     resolved_config,
     validate_config_file,
 )
-from bekas.database import get_run, list_quarantine, list_runs
+from bekas.database import get_run, get_saved_audit, list_quarantine, list_runs, save_audit
 from bekas.events import read_events
+from bekas.formats import apply_filters, format_output, parse_age, parse_size
 from bekas.formatters import format_human, format_json
 from bekas.locking import AlreadyRunningError, ProcessLock
 from bekas.models import AuditReport, Candidate, Confidence, Context, Plan
@@ -65,6 +66,42 @@ def _get_plugins() -> list[Plugin]:
         List of plugin instances.
     """
     return discover_plugins()
+
+
+def _parse_filter_arg(raw: str, parser: Callable[[str], int]) -> int:
+    """Parse a user filter argument, turning bad input into a usage error.
+
+    Args:
+        raw: Raw CLI string (e.g. ``500MB`` or ``90d``).
+        parser: :func:`bekas.formats.parse_size` or :func:`bekas.formats.parse_age`.
+
+    Returns:
+        Parsed integer (bytes or seconds).
+    """
+    try:
+        return parser(raw)
+    except ValueError as exc:
+        raise click.BadParameter(str(exc)) from exc
+
+
+def _load_audit_ref(ref: str | None) -> AuditReport:
+    """Resolve a ``--from-audit`` reference to a stored report.
+
+    Args:
+        ref: Audit id, alias, or ``last``. None means run nothing (caller skips).
+
+    Returns:
+        The stored report.
+
+    Raises:
+        SystemExit: When the reference matches no stored audit.
+    """
+    report = get_saved_audit(ref or "last")
+    if report is None:
+        click.echo(f"Error: no saved audit matching {ref or 'last'!r}. Run `bekas audit --save` first.")
+        sys.exit(1)
+    click.echo(f"Using saved audit {report.audit_id} (no rescan).")
+    return report
 
 
 def _check_tier_flags(safe_only: bool, include_review: bool) -> None:
@@ -195,6 +232,16 @@ def cli(ctx: click.Context, profile: str | None, json_output: bool, verbose: boo
 )
 @click.option("--no-cache", is_flag=True, help="Bypass the audit cache.")
 @click.option("--rebuild-cache", is_flag=True, help="Clear and rebuild the audit cache.")
+@click.option("--save", "save_name", default=None, help="Persist this audit for later --from-audit (optional NAME).")
+@click.option("--min-size", default=None, help="Only show candidates of at least this size (e.g. 500MB).")
+@click.option("--older-than", default=None, help="Only show candidates older than this (e.g. 90d).")
+@click.option(
+    "--format",
+    "fmt",
+    type=click.Choice(["table", "json", "ndjson", "csv"]),
+    default=None,
+    help="Output format (default: table).",
+)
 @click.pass_context
 def audit_cmd(
     ctx: click.Context,
@@ -204,6 +251,10 @@ def audit_cmd(
     top: int | None,
     no_cache: bool,
     rebuild_cache: bool,
+    save_name: str | None,
+    min_size: str | None,
+    older_than: str | None,
+    fmt: str | None,
 ) -> None:
     """Run a read-only audit."""
     profile_name = ctx.obj.get("profile")
@@ -222,10 +273,24 @@ def audit_cmd(
         rebuild_cache=rebuild_cache,
     )
 
-    if ctx.obj.get("json"):
+    min_size_bytes = _parse_filter_arg(min_size, parse_size) if min_size else None
+    older_than_secs = _parse_filter_arg(older_than, parse_age) if older_than else None
+    if min_size_bytes is not None or older_than_secs is not None:
+        for pr in report.plugins:
+            pr.candidates = apply_filters(pr.candidates, min_size=min_size_bytes, older_than=older_than_secs)
+        report.summary.total_bytes = sum(c.size_bytes for pr in report.plugins for c in pr.candidates)
+
+    fmt_active = fmt or ("json" if ctx.obj.get("json") else None)
+    if fmt_active == "ndjson" or fmt_active == "csv":
+        click.echo(format_output(report, fmt_active, ""))
+    elif fmt_active == "json":
         click.echo(format_json(report))
     else:
         click.echo(format_human(report, sort_by=sort_by, top=top))
+
+    if save_name is not None:
+        save_audit(report, name=save_name or None)
+        click.echo(f"Audit saved: {report.audit_id}" + (f" (name: {save_name})" if save_name else ""))
 
     # Save report in context for chaining if needed
     ctx.obj["last_audit"] = report
@@ -245,6 +310,17 @@ def audit_cmd(
     help="List at most N candidates per category (totals are unaffected).",
 )
 @click.option("--no-cache", is_flag=True, help="Bypass the audit cache.")
+@click.option("--from-audit", default=None, help="Reuse a saved audit (id, name, or 'last') instead of rescanning.")
+@click.option("--min-size", default=None, help="Only include candidates of at least this size (e.g. 500MB).")
+@click.option("--older-than", default=None, help="Only include candidates older than this (e.g. 90d).")
+@click.option("--diff", "diff_ref", default=None, help="Diff against a saved plan file (from `plan --save FILE`).")
+@click.option(
+    "--format",
+    "fmt",
+    type=click.Choice(["table", "json", "ndjson", "csv"]),
+    default=None,
+    help="Output format (default: table).",
+)
 @click.pass_context
 def plan_cmd(
     ctx: click.Context,
@@ -254,13 +330,41 @@ def plan_cmd(
     save: str | None,
     top: int | None,
     no_cache: bool,
+    from_audit: str | None,
+    min_size: str | None,
+    older_than: str | None,
+    diff_ref: str | None,
+    fmt: str | None,
 ) -> None:
     """Run a fresh audit and preview what clean would do."""
     _check_tier_flags(safe_only, include_review)
     profile_name = ctx.obj.get("profile")
-    all_plugins = _get_plugins()
-    report = run_audit(all_plugins, profile_name=profile_name, no_cache=no_cache)
+    min_size_bytes = _parse_filter_arg(min_size, parse_size) if min_size else None
+    older_than_secs = _parse_filter_arg(older_than, parse_age) if older_than else None
+
+    if from_audit:
+        report = _load_audit_ref(from_audit)
+    else:
+        all_plugins = _get_plugins()
+        report = run_audit(all_plugins, profile_name=profile_name, no_cache=no_cache)
     plan = _audit_to_plan(report, safe_only=safe_only, include_review=include_review)
+
+    if min_size_bytes is not None or older_than_secs is not None:
+        plan.candidates = apply_filters(plan.candidates, min_size=min_size_bytes, older_than=older_than_secs)
+
+    if diff_ref:
+        old_plan = _load_plan_file(diff_ref, allow_unsigned=True)
+        delta = diff_plans(old_plan, plan)
+        for key in ("added", "removed", "changed"):
+            items = delta[key]
+            click.echo(f"\n{key.capitalize()}: {len(items)}")
+            for c in items[: top or 20]:
+                extra = ""
+                if key == "changed":
+                    old = next(o for o in old_plan.candidates if o.id == c.id)
+                    extra = f" ({_human_size(old.size_bytes)} → {_human_size(c.size_bytes)})"
+                click.echo(f"  {c.path_or_handle} [{c.category}] — {_human_size(c.size_bytes)}{extra}")
+        return
 
     if save:
         # Record what each candidate looks like now, so `clean --plan-file` can
@@ -342,6 +446,10 @@ def _load_plan_file(plan_file: str, allow_unsigned: bool) -> Plan:
     default=None,
     help="Allow MANUAL-tier candidates. Default: profile allow_manual setting.",
 )
+@click.option("--interactive", "interactive", is_flag=True, help="Pick candidates one by one before applying.")
+@click.option("--from-audit", default=None, help="Reuse a saved audit (id, name, or 'last') instead of rescanning.")
+@click.option("--min-size", default=None, help="Only include candidates of at least this size (e.g. 500MB).")
+@click.option("--older-than", default=None, help="Only include candidates older than this (e.g. 90d).")
 @click.pass_context
 def clean_cmd(
     ctx: click.Context,
@@ -355,11 +463,23 @@ def clean_cmd(
     force_stale: bool,
     allow_unsigned: bool,
     allow_manual: bool | None,
+    interactive: bool,
+    from_audit: str | None,
+    min_size: str | None,
+    older_than: str | None,
 ) -> None:
     """Remove approved candidates. Dry-run by default."""
     _check_tier_flags(safe_only, include_review)
+    if interactive and non_interactive:
+        click.echo("Error: --interactive and --non-interactive are mutually exclusive.")
+        sys.exit(2)
+    if interactive and not _stdin_is_tty():
+        click.echo("Error: --interactive requires a terminal (stdin is not a tty).")
+        sys.exit(2)
     profile_name = ctx.obj.get("profile")
     profile = profile_for(profile_name)
+    min_size_bytes = _parse_filter_arg(min_size, parse_size) if min_size else None
+    older_than_secs = _parse_filter_arg(older_than, parse_age) if older_than else None
 
     # Non-interactive requires yes-all or accept-categories
     if non_interactive and not (yes_all or accept_categories):
@@ -370,9 +490,21 @@ def clean_cmd(
         plan = _load_plan_file(plan_file, allow_unsigned)
         report = None
     else:
-        all_plugins = _get_plugins()
-        report = run_audit(all_plugins, profile_name=profile_name)
+        if from_audit:
+            report = _load_audit_ref(from_audit)
+        else:
+            all_plugins = _get_plugins()
+            report = run_audit(all_plugins, profile_name=profile_name)
         plan = _audit_to_plan(report, safe_only=safe_only, include_review=include_review)
+
+    if min_size_bytes is not None or older_than_secs is not None:
+        plan.candidates = apply_filters(plan.candidates, min_size=min_size_bytes, older_than=older_than_secs)
+
+    if interactive:
+        plan.candidates = select_interactive(plan.candidates)
+        if not plan.candidates:
+            click.echo("Nothing selected.")
+            return
 
     if not plan.candidates:
         click.echo("Nothing to clean.")
@@ -424,11 +556,15 @@ def clean_cmd(
 
 @cli.command("inspect")
 @click.argument("candidate_id")
+@click.option("--from-audit", default=None, help="Search a saved audit (id, name, or 'last') instead of rescanning.")
 @click.pass_context
-def inspect_cmd(ctx: click.Context, candidate_id: str) -> None:
-    """Run a fresh audit and show full reasoning for a single candidate."""
-    all_plugins = _get_plugins()
-    report = run_audit(all_plugins, profile_name=ctx.obj.get("profile"))
+def inspect_cmd(ctx: click.Context, candidate_id: str, from_audit: str | None) -> None:
+    """Show full reasoning for a single candidate (fresh audit or a saved one)."""
+    if from_audit:
+        report = _load_audit_ref(from_audit)
+    else:
+        all_plugins = _get_plugins()
+        report = run_audit(all_plugins, profile_name=ctx.obj.get("profile"))
     for pr in report.plugins:
         for c in pr.candidates:
             if c.id == candidate_id:

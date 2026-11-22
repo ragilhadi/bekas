@@ -80,23 +80,33 @@ Runs a read-only scan across all available plugins and prints candidates.
 ```bash
 bekas audit                    # Human-readable output
 bekas audit --json             # JSON output
+bekas audit --format csv       # table|json|ndjson|csv
 bekas audit --plugin docker    # Only run Docker plugins
 bekas audit --serial           # Run plugins one at a time
 bekas audit --no-cache         # Skip the audit cache (full rescan)
 bekas audit --rebuild-cache    # Clear and rebuild the audit cache
 bekas audit --sort-by size     # Sort by reclaimable size
 bekas audit --top 20           # List at most 20 candidates per plugin (totals unaffected)
+bekas audit --min-size 500MB --older-than 90d   # Size/age filters (human units)
+bekas audit --save             # Persist this audit; later commands can reuse it
+bekas audit --save myscan      # Same, with an alias
 ```
 
 ### `bekas plan`
 
-Runs a fresh audit (audits are not stored between commands) and converts it into a concrete removal plan. You can save a cryptographically signed plan to disk and apply it later.
+Turns an audit into a concrete removal plan. By default it runs a fresh scan,
+but you can reuse a persisted audit with `--from-audit` (`last`, an id, or an
+alias) — no rescan happens. You can save a cryptographically signed plan to
+disk and apply or diff it later.
 
 ```bash
 bekas plan                     # Preview in human-readable format
 bekas plan --safe-only         # Only SAFE-tier items (this is the default)
 bekas plan --include-review    # Include REVIEW-tier items
 bekas plan --save plan.json    # Save a signed plan file
+bekas plan --from-audit last   # Use the last saved audit (no rescan)
+bekas plan --diff plan.json    # Compare against a saved plan: added/removed/changed
+bekas plan --min-size 1GB --older-than 1y       # Size/age filters
 ```
 
 ### `bekas clean`
@@ -109,6 +119,8 @@ bekas clean --apply --yes-all                # Skip per-category prompts
 bekas clean --apply --non-interactive \
                --accept-categories "docker,tmp" # CI-friendly mode
 bekas clean --apply --plan-file plan.json    # Apply a signed plan
+bekas clean --interactive                    # Toggle candidates one by one
+bekas clean --from-audit last --min-size 1GB # Reuse saved audit + filter
 ```
 
 Options:
@@ -119,6 +131,9 @@ Options:
 - `--yes-all` — Skip all interactive prompts.
 - `--non-interactive` — Requires `--accept-categories`.
 - `--accept-categories` — Comma-separated category whitelist for non-interactive runs.
+- `--interactive` — Pick candidates one-by-one (grouped by category) before applying; shows a final selection summary before the typed gate. Mutually exclusive with `--non-interactive`, requires a terminal.
+- `--from-audit` — Reuse a persisted audit (`last`, id, or alias) instead of rescanning.
+- `--min-size` / `--older-than` — Size/age filters with human units (`500MB`, `90d`).
 - `--plan-file` — Apply a previously saved signed plan instead of re-auditing. Unsigned or tampered files are refused; candidates that changed since the plan was saved are skipped.
 - `--force-stale` — Apply candidates even if they changed since the plan was saved.
 - `--allow-unsigned` — Accept a plan file that has no signature (a signed file is always verified).
