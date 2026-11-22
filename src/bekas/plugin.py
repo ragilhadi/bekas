@@ -10,6 +10,7 @@ from collections.abc import Iterator
 from dataclasses import dataclass
 
 from bekas.models import Candidate, Context, RemovalResult
+from bekas.pluginsdk import check_api_compatibility
 
 logger = logging.getLogger(__name__)
 
@@ -189,16 +190,30 @@ class PluginLoadError:
 def load_plugins() -> tuple[list[Plugin], list[PluginLoadError]]:
     """Load every ``bekas.plugins`` entry point, keeping the failures.
 
+    A third-party module that declares a ``__bekas_api_version__`` different
+    from :data:`bekas.pluginsdk.API_VERSION` is refused with a clear message
+    (undocumented attribute = legacy plugin, keeps loading).
+
     Returns:
         ``(plugins, errors)``: the instantiated plugins, and one
         :class:`PluginLoadError` per entry point that failed to import,
-        instantiate, or that is not a ``Plugin`` subclass.
+        instantiate, is not a ``Plugin`` subclass, or targets an
+        incompatible plugin API.
     """
     plugins: list[Plugin] = []
     errors: list[PluginLoadError] = []
     for ep in metadata.entry_points(group="bekas.plugins"):
         try:
-            inst = ep.load()()
+            mod = ep.load()
+        except Exception as exc:
+            errors.append(PluginLoadError(ep.name, f"{type(exc).__name__}: {exc}"))
+            continue
+        incompatible = check_api_compatibility(getattr(mod, "__bekas_api_version__", None))
+        if incompatible:
+            errors.append(PluginLoadError(ep.name, incompatible))
+            continue
+        try:
+            inst = mod()
         except Exception as exc:
             errors.append(PluginLoadError(ep.name, f"{type(exc).__name__}: {exc}"))
             continue

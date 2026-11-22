@@ -244,8 +244,46 @@ bekas tui
 | `browser.safari` | `browser.safari` | Safari caches (macOS only) | — |
 | `vscode.extensions.orphan` | `vscode.extensions.orphan` | VS Code extensions not in extensions.json | — |
 | `jetbrains.caches` | `jetbrains.caches` | Old JetBrains IDE caches | — |
+| `docker.volumes` | `docker.volume` | Unused Docker volumes (REVIEW: user data) | docker |
+| `homebrew.cache` | `homebrew.cache` | Homebrew download cache (macOS/Linuxbrew) | — |
+| `npm.cacache` | `npm.cacache` | npm `_cacache` and `_logs` | — |
+| `pkgmanager.caches` | `apt.cache`, `dnf.cache` | apt/dnf package cache archives | — |
+| `devtool.caches` | `pytest.cache`, `mypy.cache`, `ruff.cache` | Per-project tool caches | — |
+| `jupyter.checkpoints` | `jupyter.checkpoints` | `.ipynb_checkpoints` dirs | — |
+| `conda.artifacts` | `conda.pkgs`, `conda.env` | Conda `pkgs` cache (SAFE) + named envs (REVIEW) | — |
+| `terraform.artifacts` | `terraform.artifacts` | `.terraform` providers/modules (keeps lockfile) | — |
+| `android.avd` | `android.avd`, `flutter.sdk` | Old AVD images and non-current Flutter SDKs | — |
+| `linux.snap_flatpak` | `snap.revs`, `flatpak.unused` | Old snap revisions, unused flatpaks | snap, flatpak |
 
-Plugins are auto-discovered via `entry_points` in `pyproject.toml`. You can write your own by subclassing `bekas.plugin.Plugin`.
+### Writing plugins
+
+Subclass `bekas.plugin.Plugin`, or scaffold a ready-to-edit package:
+
+```bash
+bekas plugins new myspace          # creates ./bekas-plugin-myspace
+pip install -e ./bekas-plugin-myspace
+bekas plugins list                  # your plugin appears
+```
+
+Third-party plugins declare `__bekas_api_version__` (currently `1`). A plugin
+targeting a different API version refuses to load with a clear message instead
+of breaking audits; plugins without the attribute (pre-SDK) keep loading.
+
+### Shell completions & CI
+
+```bash
+source <(bekas completion bash)     # or: zsh | fish
+bekas audit --notify                # desktop notification with the reclaimable total
+bekas audit --exit-code-above 5GB   # exit 4 in cron/CI when reclaimable exceeds 5GB
+```
+
+### Install channels
+
+```bash
+pipx install bekas                  # recommended
+uv tool install bekas               # fastest
+pip install bekas                   # plain pip
+```
 
 ---
 

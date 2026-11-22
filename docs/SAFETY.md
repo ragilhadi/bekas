@@ -68,8 +68,8 @@ excluded, and `is_excluded` stays consistent with `is_safe_to_delete`.
 
 Every candidate is assigned a confidence tier:
 
-- **SAFE** — Deletion is fully reversible or recreatable (e.g., pip cache, Rust target).
-- **REVIEW** — May affect active workflows; requires user review (e.g., node_modules in a recently-touched project).
+- **SAFE** — Deletion is fully reversible or recreatable (e.g., pip cache, Rust target, `_cacache`, conda `pkgs`, `.pytest_cache`/`.mypy_cache`/`.ruff_cache`, brew cache, Jupyter checkpoints).
+- **REVIEW** — May affect active workflows; requires user review (e.g., node_modules in a recently-touched project, Docker volumes, conda envs, Terraform providers, AVD images, snap revisions, flatpak runtimes).
 - **MANUAL** — High risk; only removed with explicit opt-in (e.g., browser caches, quarantined items older than retention).
 
 MANUAL-tier candidates are double-gated: `clean` refuses any plan containing
