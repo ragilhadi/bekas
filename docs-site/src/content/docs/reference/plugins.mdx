@@ -1,6 +1,6 @@
 ---
 title: Plugins
-description: All 29 built-in plugins and what they find.
+description: All 39 built-in plugins and what they find.
 ---
 
 | Plugin | Finds | Needs |
@@ -34,5 +34,15 @@ description: All 29 built-in plugins and what they find.
 | `browser.safari` | Safari caches (macOS) | — |
 | `vscode.extensions.orphan` | VS Code extensions missing from `extensions.json` | — |
 | `jetbrains.caches` | Caches of older JetBrains IDEs | — |
+| `docker.volumes` | Unused Docker volumes (may hold user data) | docker |
+| `homebrew.cache` | Homebrew download cache (macOS/Linuxbrew) | — |
+| `npm.cacache` | npm `_cacache` and `_logs` | — |
+| `pkgmanager.caches` | apt `.deb` archives and dnf cache | — |
+| `devtool.caches` | per-project `.pytest_cache` / `.mypy_cache` / `.ruff_cache` | — |
+| `jupyter.checkpoints` | `.ipynb_checkpoints` directories | — |
+| `conda.artifacts` | conda `pkgs` cache (SAFE) and named envs (REVIEW) | — |
+| `terraform.artifacts` | `.terraform` providers/modules (lockfile kept) | — |
+| `android.avd` | old Android AVDs and non-current Flutter SDKs | — |
+| `linux.snap_flatpak` | disabled snap revisions and unused flatpak runtimes | snap, flatpak |
 
 Run `bekas plugins list` to see availability, whether each is enabled, and whether it supports quarantine on your machine.
