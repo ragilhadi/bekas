@@ -101,6 +101,31 @@ _SENSITIVE_GLOBS: list[str] = [
     "**/*.gpg",
     "**/.git",
     "**/.git/**",
+    # Credential / secret stores (issue #20). Note: ``.env.*`` also over-protects
+    # ``.env.example`` templates — acceptable for a delete-side safety net.
+    "**/.env",
+    "**/.env.*",
+    "**/.npmrc",
+    "**/.pypirc",
+    "**/.docker/config.json",
+    "**/.config/gh",
+    "**/.config/gh/*",
+    "**/gh/config",
+    "**/gh/config/*",
+    "**/.password-store",
+    "**/.password-store/*",
+    "**/id_rsa",
+    "**/id_rsa.*",
+    "**/id_ed25519",
+    "**/id_ed25519.*",
+    "**/id_ecdsa",
+    "**/id_ecdsa.*",
+    # OS keychains and browser credential databases (issue #20)
+    "**/Library/Keychains",
+    "**/Library/Keychains/*",
+    "**/Login Data",
+    "**/Cookies",
+    "**/cookies.sqlite*",
 ]
 
 _SENSITIVE_NAMES: set[str] = {
@@ -110,6 +135,9 @@ _SENSITIVE_NAMES: set[str] = {
     ".kube",
     ".netrc",
     ".git",
+    # Directories whose whole subtree may hold credentials (issue #20)
+    ".password-store",
+    ".config/gh",
 }
 
 # Path traversal pattern: matches .. as a standalone path component
@@ -142,7 +170,10 @@ def _expand_exclusions() -> list[Path]:
     try:
         home = Path.home().resolve()
         for name in _SENSITIVE_NAMES:
-            excl.append(home / name)
+            if "/" not in name:
+                excl.append(home / name)
+            # Nested names (e.g. ".config/gh") are protected at any depth by
+            # _SENSITIVE_GLOBS, not by fixed absolute paths.
     except RuntimeError:
         pass
     # bekas's own data directory (quarantine, undo DB, lock, audit log) must

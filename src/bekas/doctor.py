@@ -3,15 +3,19 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 import subprocess
 import sys
+import time
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 import psutil
 import yaml
 
-from bekas.config import config_path, ensure_config, quarantine_dir, runs_db_path
+from bekas.config import config_path, data_dir, ensure_config, quarantine_dir, runs_db_path
+from bekas.database import _init_db
 from bekas.plugin import load_plugins
 
 
@@ -255,6 +259,136 @@ default_checks: list[Any] = [
     _check_disk_space,
     _check_cross_fs,
 ]
+
+
+@dataclass
+class FixAction:
+    """One repair performed (or proposed) by ``doctor --fix``.
+
+    Attributes:
+        name: Machine-readable identifier of the repair.
+        detail: Human-readable description of what was (or would be) changed.
+    """
+
+    name: str
+    detail: str
+
+
+def _fix_permissions(path: Path, actions: list[FixAction]) -> None:
+    """Tighten the permissions of a bekas-owned file to owner-only.
+
+    Args:
+        path: File to check and chmod.
+        actions: List to append performed actions to.
+    """
+    try:
+        mode = path.stat().st_mode & 0o777
+    except OSError:
+        return
+    if mode & 0o077:  # group/other have any access
+        try:
+            path.chmod(mode & ~(0o077))
+            actions.append(FixAction("fix_permissions", f"chmod o-=g= {path} (was {mode:o})"))
+        except OSError as exc:
+            actions.append(FixAction("fix_permissions", f"could not chmod {path}: {exc}"))
+
+
+def _fix_corrupt_runs_db(actions: list[FixAction]) -> None:
+    """Drop corrupt rows from the runs database, keeping the file.
+
+    Args:
+        actions: List to append performed actions to.
+    """
+    db_path = runs_db_path()
+    if not db_path.exists():
+        return
+    try:
+        conn = _init_db()
+    except sqlite3.DatabaseError:
+        # The file itself is beyond repair; quarantine it, never delete user data.
+        backup = db_path.with_suffix(f".corrupt.{int(time.time())}")
+        try:
+            db_path.rename(backup)
+            actions.append(FixAction("fix_runs_db", f"moved unreadable runs DB to {backup}"))
+        except OSError as exc:
+            actions.append(FixAction("fix_runs_db", f"could not move corrupt runs DB: {exc}"))
+        return
+    try:
+        cur = conn.execute(
+            "SELECT run_id, timestamp, plan_json, results_json FROM runs "
+            "WHERE timestamp IS NULL OR timestamp = '' OR plan_json IS NULL OR results_json IS NULL"
+        )
+        bad_ids = [r["run_id"] for r in cur.fetchall()]
+        for bad in bad_ids:
+            conn.execute("DELETE FROM runs WHERE run_id = ?", (bad,))
+        if bad_ids:
+            conn.commit()
+            actions.append(FixAction("fix_runs_db", f"dropped {len(bad_ids)} malformed run row(s)"))
+    except sqlite3.DatabaseError as exc:
+        actions.append(FixAction("fix_runs_db", f"runs DB check failed: {exc}"))
+    finally:
+        conn.close()
+
+
+def collect_fixes(dry_run: bool = False) -> tuple[list[FixAction], list[str]]:
+    """Diagnose and repair the bekas runtime environment.
+
+    Repairs only bekas-owned state: missing data directories, loose
+    permissions on the lock file and runs DB, and corrupt run rows. Never
+    touches user files.
+
+    Args:
+        dry_run: When True, report what would be done without changing anything.
+
+    Returns:
+        Tuple of (actions performed or proposed, human-readable problems found).
+    """
+    actions: list[FixAction] = []
+    problems: list[str] = []
+    apply = not dry_run
+
+    # 1. Recreate missing data directories (quarantine is created eagerly).
+    data_d = data_dir()
+    for sub in ("quarantine",):
+        target = data_d / sub
+        if not target.is_dir():
+            problems.append(f"missing directory: {target}")
+            if apply:
+                try:
+                    target.mkdir(parents=True, exist_ok=True)
+                    actions.append(FixAction("make_dir", f"created {target}"))
+                except OSError as exc:
+                    actions.append(FixAction("make_dir", f"could not create {target}: {exc}"))
+
+    # 2. Tighten permissions on bekas-owned state files.
+    db_path = data_d / "runs.db"
+    lock_path = data_d / "bekas.lock"
+    for candidate in (db_path, lock_path):
+        if candidate.exists():
+            try:
+                mode = candidate.stat().st_mode & 0o777
+            except OSError:
+                continue
+            if mode & 0o077:
+                problems.append(f"loose permissions on {candidate} ({mode:o})")
+                if apply:
+                    _fix_permissions(candidate, actions)
+                else:
+                    actions.append(FixAction("fix_permissions", f"chmod o-=g= {candidate} (was {mode:o})"))
+        else:
+            problems.append(f"state file absent (created on demand): {candidate}")
+
+    # 3. Drop corrupt rows from the runs DB.
+    if db_path.exists():
+        if apply:
+            _fix_corrupt_runs_db(actions)
+        else:
+            try:
+                _init_db()
+            except sqlite3.DatabaseError as exc:
+                problems.append(f"runs DB unreadable: {exc}")
+
+    return actions, problems
 
 
 def run_checks(skip: list[str] | None = None) -> list[CheckResult]:

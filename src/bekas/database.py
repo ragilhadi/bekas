@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from bekas.config import runs_db_path as runs_db_path
-from bekas.models import Candidate, Plan, RunResult
+from bekas.models import AuditReport, Candidate, Plan, RunResult
 
 
 def _init_db(db_path: Path | None = None) -> sqlite3.Connection:
@@ -27,51 +27,67 @@ def _init_db(db_path: Path | None = None) -> sqlite3.Connection:
     """
     path = db_path or runs_db_path()
     conn = sqlite3.connect(str(path))
-    conn.row_factory = sqlite3.Row
-    conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS runs (
-            run_id TEXT PRIMARY KEY,
-            timestamp TEXT NOT NULL,
-            audit_id TEXT NOT NULL,
-            plan_json TEXT NOT NULL,
-            results_json TEXT NOT NULL,
-            total_bytes_freed INTEGER NOT NULL DEFAULT 0
+    try:
+        conn.row_factory = sqlite3.Row
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS runs (
+                run_id TEXT PRIMARY KEY,
+                timestamp TEXT NOT NULL,
+                audit_id TEXT NOT NULL,
+                plan_json TEXT NOT NULL,
+                results_json TEXT NOT NULL,
+                total_bytes_freed INTEGER NOT NULL DEFAULT 0
+            )
+            """
         )
-        """
-    )
-    conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS quarantine (
-            quarantine_id TEXT PRIMARY KEY,
-            run_id TEXT NOT NULL,
-            timestamp TEXT NOT NULL,
-            category TEXT NOT NULL,
-            original_path TEXT NOT NULL,
-            quarantine_path TEXT NOT NULL,
-            size_bytes INTEGER NOT NULL DEFAULT 0,
-            metadata_json TEXT
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS quarantine (
+                quarantine_id TEXT PRIMARY KEY,
+                run_id TEXT NOT NULL,
+                timestamp TEXT NOT NULL,
+                category TEXT NOT NULL,
+                original_path TEXT NOT NULL,
+                quarantine_path TEXT NOT NULL,
+                size_bytes INTEGER NOT NULL DEFAULT 0,
+                metadata_json TEXT
+            )
+            """
         )
-        """
-    )
-    conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS audit_cache (
-            plugin TEXT NOT NULL,
-            path TEXT NOT NULL,
-            fingerprint TEXT NOT NULL,
-            candidate_json TEXT NOT NULL,
-            cached_at INTEGER NOT NULL,
-            PRIMARY KEY (plugin, path)
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS audit_cache (
+                plugin TEXT NOT NULL,
+                path TEXT NOT NULL,
+                fingerprint TEXT NOT NULL,
+                candidate_json TEXT NOT NULL,
+                cached_at INTEGER NOT NULL,
+                PRIMARY KEY (plugin, path)
+            )
+            """
         )
-        """
-    )
-    conn.execute(
-        """
-        CREATE INDEX IF NOT EXISTS idx_audit_cache_cached_at ON audit_cache(cached_at)
-        """
-    )
-    conn.commit()
+        conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_audit_cache_cached_at ON audit_cache(cached_at)
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS saved_audits (
+                audit_id TEXT PRIMARY KEY,
+                name TEXT UNIQUE,
+                created_at TEXT NOT NULL,
+                report_json TEXT NOT NULL
+            )
+            """
+        )
+        conn.commit()
+    except sqlite3.DatabaseError:
+        # Close the handle before propagating: on Windows an open handle makes
+        # any later move/delete of the file fail with a sharing violation.
+        conn.close()
+        raise
     return conn
 
 
@@ -363,3 +379,92 @@ def prune_audit_cache(max_age_hours: int = 24, db_path: Path | None = None) -> i
     conn.commit()
     conn.close()
     return cur.rowcount
+
+
+def save_audit(report: AuditReport, name: str | None = None, db_path: Path | None = None) -> str:
+    """Persist a full audit report so later commands can consume it without a rescan.
+
+    Args:
+        report: The audit report to store.
+        name: Optional human-friendly alias; ``"last"`` always resolves to the
+            most recent audit regardless of names.
+        db_path: Optional custom database path.
+
+    Returns:
+        The audit id under which the report was stored.
+    """
+    created_at = datetime.now(UTC).isoformat()
+    conn = _init_db(db_path)
+    try:
+        conn.execute(
+            "INSERT OR REPLACE INTO saved_audits (audit_id, name, created_at, report_json) VALUES (?, ?, ?, ?)",
+            (report.audit_id, name, created_at, report.model_dump_json()),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    return report.audit_id
+
+
+def get_saved_audit(ref: str, db_path: Path | None = None) -> AuditReport | None:
+    """Load a saved audit by id, alias, or the special ref ``last``.
+
+    Args:
+        ref: Audit id, unique alias, or ``last`` (newest by created_at).
+        db_path: Optional custom database path.
+
+    Returns:
+        The stored report, or None when nothing matches.
+    """
+    conn = _init_db(db_path)
+    try:
+        if ref == "last":
+            row = conn.execute("SELECT report_json FROM saved_audits ORDER BY created_at DESC LIMIT 1").fetchone()
+        else:
+            row = conn.execute(
+                "SELECT report_json FROM saved_audits WHERE audit_id = ? OR name = ?", (ref, ref)
+            ).fetchone()
+    finally:
+        conn.close()
+    if not row:
+        return None
+    try:
+        return AuditReport.model_validate_json(row["report_json"])
+    except ValueError:
+        return None
+
+
+def list_saved_audits(db_path: Path | None = None) -> list[dict[str, Any]]:
+    """List saved audits, newest first.
+
+    Args:
+        db_path: Optional custom database path.
+
+    Returns:
+        Rows with ``audit_id``, ``name``, ``created_at``.
+    """
+    conn = _init_db(db_path)
+    try:
+        rows = conn.execute("SELECT audit_id, name, created_at FROM saved_audits ORDER BY created_at DESC").fetchall()
+    finally:
+        conn.close()
+    return [dict(r) for r in rows]
+
+
+def delete_saved_audit(ref: str, db_path: Path | None = None) -> bool:
+    """Delete a saved audit by id or alias.
+
+    Args:
+        ref: Audit id or unique alias.
+        db_path: Optional custom database path.
+
+    Returns:
+        True when a row was deleted.
+    """
+    conn = _init_db(db_path)
+    try:
+        cur = conn.execute("DELETE FROM saved_audits WHERE audit_id = ? OR name = ?", (ref, ref))
+        conn.commit()
+    finally:
+        conn.close()
+    return cur.rowcount > 0

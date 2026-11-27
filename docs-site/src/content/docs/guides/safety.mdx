@@ -19,6 +19,8 @@ description: Confidence tiers, hard exclusions and the other protections that ke
 - **bekas's own data directory** is excluded, so quarantine contents are never cleaned by accident.
 - **Non-local filesystems** (NFS, SMB, FUSE) and **symlinks leaving `$HOME`** are skipped.
 - **Recently modified files** (within `min_quiet_hours`, default 6) are skipped.
+- **MANUAL is opt-in twice** — plans containing `MANUAL`-tier candidates are refused unless `--allow-manual` is passed (or `allow_manual: true` in the profile); the typed high-risk token confirmation is still required on top, and `--yes-all` alone can never bypass it.
+- **Credential shield** — `.env*`, `.npmrc`, `.pypirc`, `id_rsa`/`id_ed25519`/`id_ecdsa`, `~/.password-store`, `gh` CLI config, Docker config, OS keychains and browser `Login Data`/`Cookies` are protected at every depth, regardless of tier.
 - **Typed confirmation** for high-risk operations.
 - **Signed plans** detect tampering.
 

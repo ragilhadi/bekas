@@ -7,12 +7,15 @@ present in the current ``extensions.json``.  Tier ``REVIEW``.
 from __future__ import annotations
 
 import json
+import logging
 import shutil
 from collections.abc import Iterator
 from pathlib import Path
 
 from bekas.models import Candidate, Confidence, Context, RemovalResult
 from bekas.plugin import Capabilities, Plugin
+
+logger = logging.getLogger(__name__)
 
 
 class VscodeExtensionsPlugin(Plugin):
@@ -146,7 +149,7 @@ def _known_extensions() -> set[str]:
             if isinstance(recs, list):
                 return {item for item in recs if isinstance(item, str)}
     except Exception:
-        pass
+        logger.debug("vscode.extensions: unreadable %s", ext_json, exc_info=True)
     return set()
 
 
