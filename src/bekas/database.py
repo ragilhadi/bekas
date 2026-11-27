@@ -27,61 +27,67 @@ def _init_db(db_path: Path | None = None) -> sqlite3.Connection:
     """
     path = db_path or runs_db_path()
     conn = sqlite3.connect(str(path))
-    conn.row_factory = sqlite3.Row
-    conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS runs (
-            run_id TEXT PRIMARY KEY,
-            timestamp TEXT NOT NULL,
-            audit_id TEXT NOT NULL,
-            plan_json TEXT NOT NULL,
-            results_json TEXT NOT NULL,
-            total_bytes_freed INTEGER NOT NULL DEFAULT 0
+    try:
+        conn.row_factory = sqlite3.Row
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS runs (
+                run_id TEXT PRIMARY KEY,
+                timestamp TEXT NOT NULL,
+                audit_id TEXT NOT NULL,
+                plan_json TEXT NOT NULL,
+                results_json TEXT NOT NULL,
+                total_bytes_freed INTEGER NOT NULL DEFAULT 0
+            )
+            """
         )
-        """
-    )
-    conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS quarantine (
-            quarantine_id TEXT PRIMARY KEY,
-            run_id TEXT NOT NULL,
-            timestamp TEXT NOT NULL,
-            category TEXT NOT NULL,
-            original_path TEXT NOT NULL,
-            quarantine_path TEXT NOT NULL,
-            size_bytes INTEGER NOT NULL DEFAULT 0,
-            metadata_json TEXT
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS quarantine (
+                quarantine_id TEXT PRIMARY KEY,
+                run_id TEXT NOT NULL,
+                timestamp TEXT NOT NULL,
+                category TEXT NOT NULL,
+                original_path TEXT NOT NULL,
+                quarantine_path TEXT NOT NULL,
+                size_bytes INTEGER NOT NULL DEFAULT 0,
+                metadata_json TEXT
+            )
+            """
         )
-        """
-    )
-    conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS audit_cache (
-            plugin TEXT NOT NULL,
-            path TEXT NOT NULL,
-            fingerprint TEXT NOT NULL,
-            candidate_json TEXT NOT NULL,
-            cached_at INTEGER NOT NULL,
-            PRIMARY KEY (plugin, path)
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS audit_cache (
+                plugin TEXT NOT NULL,
+                path TEXT NOT NULL,
+                fingerprint TEXT NOT NULL,
+                candidate_json TEXT NOT NULL,
+                cached_at INTEGER NOT NULL,
+                PRIMARY KEY (plugin, path)
+            )
+            """
         )
-        """
-    )
-    conn.execute(
-        """
-        CREATE INDEX IF NOT EXISTS idx_audit_cache_cached_at ON audit_cache(cached_at)
-        """
-    )
-    conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS saved_audits (
-            audit_id TEXT PRIMARY KEY,
-            name TEXT UNIQUE,
-            created_at TEXT NOT NULL,
-            report_json TEXT NOT NULL
+        conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_audit_cache_cached_at ON audit_cache(cached_at)
+            """
         )
-        """
-    )
-    conn.commit()
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS saved_audits (
+                audit_id TEXT PRIMARY KEY,
+                name TEXT UNIQUE,
+                created_at TEXT NOT NULL,
+                report_json TEXT NOT NULL
+            )
+            """
+        )
+        conn.commit()
+    except sqlite3.DatabaseError:
+        # Close the handle before propagating: on Windows an open handle makes
+        # any later move/delete of the file fail with a sharing violation.
+        conn.close()
+        raise
     return conn
 
 
