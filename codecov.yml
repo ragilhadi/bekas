@@ -1,0 +1,29 @@
+# Codecov configuration
+# Docs: https://docs.codecov.com/configuration
+codecov:
+  # Fail the CI status only when a check runs; never block on CI outages.
+  require_ci_to_pass: true
+  notify:
+    after_n_builds: 1   # one coverage job (Coverage gate) → don't wait for more
+
+coverage:
+  status:
+    # Project: report the whole-suite coverage on every PR.
+    project:
+      default:
+        # The suite is at ~100% locally; allow tiny drift (e.g. branch
+        # counting differences between OS coverage runs) without failing.
+        threshold: 1%
+        informational: false
+    # Patch: coverage of the new lines the PR touches.
+    patch:
+      default:
+        informational: true   # report, but don't fail PRs on patch coverage
+
+comment:
+  layout: "condensed_header, diff, sunburst, footer"
+  behavior: default
+  require_changes: false   # always comment, even when coverage is unchanged
+
+github_checks:
+  annotations: true
