@@ -28,3 +28,16 @@ bekas --profile ci-runner clean --apply --yes-all --non-interactive
 | 1 | Invalid plan signature / aborted / generic failure |
 | 2 | Invalid flag combination |
 | 3 | Another `bekas clean --apply` is already running |
+| 4 | `audit --exit-code-above` threshold exceeded |
+
+## Scheduled audits
+
+`audit --exit-code-above <size>` makes bekas cron/CI friendly: it exits with code `4` when the reclaimable total crosses the threshold, so a job step can fail or alert.
+
+```bash
+# Nightly: notify when >5GB reclaimable, fail the job when >10GB
+bekas audit --notify
+bekas audit --exit-code-above 10GB
+```
+
+`--notify` sends a desktop notification (macOS `osascript`, Linux `notify-send`) with the reclaimable total; it is best-effort and never fails the run.

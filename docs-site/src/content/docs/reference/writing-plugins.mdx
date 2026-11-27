@@ -45,4 +45,26 @@ Register it in your package's `pyproject.toml`:
 old_logs = "mypkg.plugins:OldLogsPlugin"
 ```
 
+## Scaffold instead of boilerplate
+
+```bash
+bekas plugins new myspace
+cd bekas-plugin-myspace && pip install -e .
+```
+
+generates the full package — entry point, plugin module, tests and README —
+ready to edit.
+
+## API version gate
+
+Declare the bekas plugin API your plugin targets:
+
+```python
+__bekas_api_version__ = 1
+```
+
+A plugin built for a different API version refuses to load with a clear message
+(`bekas plugins list`, `bekas doctor`); plugins without the attribute keep
+loading, so pre-SDK plugins stay compatible.
+
 Candidates always pass through bekas's safety filter before they are shown or acted upon.

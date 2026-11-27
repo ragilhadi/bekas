@@ -68,14 +68,27 @@ excluded, and `is_excluded` stays consistent with `is_safe_to_delete`.
 
 Every candidate is assigned a confidence tier:
 
-- **SAFE** — Deletion is fully reversible or recreatable (e.g., pip cache, Rust target).
-- **REVIEW** — May affect active workflows; requires user review (e.g., node_modules in a recently-touched project).
+- **SAFE** — Deletion is fully reversible or recreatable (e.g., pip cache, Rust target, `_cacache`, conda `pkgs`, `.pytest_cache`/`.mypy_cache`/`.ruff_cache`, brew cache, Jupyter checkpoints).
+- **REVIEW** — May affect active workflows; requires user review (e.g., node_modules in a recently-touched project, Docker volumes, conda envs, Terraform providers, AVD images, snap revisions, flatpak runtimes).
 - **MANUAL** — High risk; only removed with explicit opt-in (e.g., browser caches, quarantined items older than retention).
 
 MANUAL-tier candidates are double-gated: `clean` refuses any plan containing
 them unless `--allow-manual` is passed (or `allow_manual: true` is set in the
 active profile), and the typed high-risk token confirmation is still required
 on top.
+
+## Undo
+
+- Quarantined items are restored by moving them back; `bekas undo <run_id> --list`
+  shows per-item state (`restorable`, `restored`, `permanent`, `missing`, `dry-run`).
+- `bekas undo <run_id> --item <candidate_id>` restores a single candidate; it is
+  idempotent — re-restoring an already-restored item never duplicates anything.
+- Beyond quarantine: plugins may implement undo for non-file removals. The
+  `git.branches` plugin records the branch SHA at discovery; `undo` recreates a
+  deleted branch from that SHA while the commit is still reachable. The
+  `plugins list` table shows an **Undo** column stating support honestly.
+- `bekas history <run_id> --report <file.md>` exports per-item markdown of what
+  was removed, restored and freed.
 
 ## Protected credential paths (opt-out only via user exclusions)
 

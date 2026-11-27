@@ -58,6 +58,7 @@ class GitBranchesPlugin(Plugin):
                 # Check last commit date on branch
                 last_commit = _last_commit_date(repo, branch)
                 if last_commit and last_commit < cutoff:
+                    sha = _branch_sha(repo, branch)
                     yield Candidate(
                         id=f"git:{repo.name}:{branch}",
                         category="git.branch",
@@ -68,40 +69,69 @@ class GitBranchesPlugin(Plugin):
                             f"Branch '{branch}' is fully merged into '{default}' "
                             f"and has no commits in {min_idle_days}+ days."
                         ),
-                        metadata={"repo": str(repo), "branch": branch, "default": default},
+                        metadata={"repo": str(repo), "branch": branch, "default": default, "sha": sha},
                     )
 
     def remove(self, candidate: Candidate, ctx: Context) -> RemovalResult:
-        """Delete a local git branch.
+        """Delete a local git branch, recording a SHA-based undo token.
 
         Args:
             candidate: Branch candidate to remove.
             ctx: Execution context.
 
         Returns:
-            Result of the branch deletion attempt.
+            Result of the branch deletion attempt. On success the
+            ``undo_token`` carries ``<repo>|<branch>|<sha>`` when the SHA is
+            reachable, so ``undo()`` can recreate the branch.
         """
         repo = Path(candidate.path_or_handle)
         branch = candidate.metadata.get("branch", "")
+        sha = candidate.metadata.get("sha")
         try:
             proc = ctx.run_command(["git", "branch", "-d", branch], cwd=repo)
             success = proc.returncode == 0
+            token = f"{repo}|{branch}|{sha}" if success and sha else None
             return RemovalResult(
                 success=success,
                 bytes_freed=0,
-                undo_token=None,
+                undo_token=token,
                 log=proc.stdout + proc.stderr,
             )
         except Exception as exc:
             return RemovalResult(success=False, bytes_freed=0, log=str(exc))
 
+    def undo(self, candidate: Candidate, ctx: Context, undo_token: str) -> RemovalResult:
+        """Recreate a deleted branch from its recorded SHA.
+
+        Args:
+            candidate: Candidate that was removed.
+            ctx: Execution context.
+            undo_token: ``<repo>|<branch>|<sha>`` token stored at removal time.
+
+        Returns:
+            Result of the branch recreation attempt.
+        """
+        try:
+            repo_str, branch, sha = undo_token.split("|", 2)
+        except ValueError:
+            return RemovalResult(success=False, bytes_freed=0, log=f"Malformed git undo token: {undo_token!r}")
+        repo = Path(repo_str)
+        if not repo.is_dir():
+            return RemovalResult(success=False, bytes_freed=0, log=f"Repository no longer exists: {repo}")
+        try:
+            proc = ctx.run_command(["git", "branch", branch, sha], cwd=repo)
+            success = proc.returncode == 0
+            return RemovalResult(success=success, bytes_freed=0, log=proc.stdout + proc.stderr)
+        except Exception as exc:
+            return RemovalResult(success=False, bytes_freed=0, log=str(exc))
+
     def supports_undo(self) -> bool:
-        """Return False because branch deletion cannot be undone by this plugin.
+        """Return True: deleted branches can be recreated from the stored SHA.
 
         Returns:
             Whether undo is supported.
         """
-        return False
+        return True
 
 
 def _default_branch(repo: Path) -> str | None:
@@ -155,6 +185,28 @@ def _merged_branches(repo: Path, default: str) -> list[str]:
         if line:
             branches.append(line)
     return branches
+
+
+def _branch_sha(repo: Path, branch: str) -> str | None:
+    """Resolve a branch to its commit SHA, for restorable undo.
+
+    Args:
+        repo: Path to the git repository.
+        branch: Branch name.
+
+    Returns:
+        Full 40-char SHA, or None when it cannot be resolved.
+    """
+    proc = subprocess.run(
+        ["git", "rev-parse", "--verify", "--quiet", f"refs/heads/{branch}"],
+        cwd=repo,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if proc.returncode != 0:
+        return None
+    return proc.stdout.strip() or None
 
 
 def _last_commit_date(repo: Path, branch: str) -> datetime | None:

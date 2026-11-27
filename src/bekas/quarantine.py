@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import errno
+import json
 import os
 import shutil
 from dataclasses import dataclass, field
@@ -13,10 +14,14 @@ from typing import Any
 from bekas.config import quarantine_dir
 from bekas.database import (
     add_quarantine,
+    get_quarantine_item,
+    get_run,
     list_quarantine,
     mark_undo_restored,
     remove_quarantine_entry,
 )
+from bekas.models import Candidate, Context
+from bekas.plugin import Plugin
 
 
 class PartialMoveError(OSError):
@@ -247,19 +252,34 @@ class UndoOutcome:
     permanent: int = 0
 
 
-def undo_run_results(run_id: str, results: list[dict[str, Any]]) -> UndoOutcome:
+def undo_run_results(
+    run_id: str,
+    results: list[dict[str, Any]],
+    candidates: list[Candidate] | None = None,
+    plugins: list[Plugin] | None = None,
+) -> UndoOutcome:
     """Restore every quarantined item of a run, skipping ones already restored.
+
+    Quarantined paths are moved back with :func:`restore_from_quarantine`.
+    Items whose ``undo_token`` is not a quarantine entry (e.g. a plugin's
+    opaquely-formatted token such as ``<repo>|<branch>|<sha>``) are routed to
+    the owning plugin's ``undo()`` when the plugin advertises undo support.
 
     Args:
         run_id: Run identifier (used to record progress).
         results: Parsed ``results_json`` of the run.
+        candidates: Candidates of the originating plan, matched by
+            ``candidate_id`` so plugin undo can receive full metadata.
+        plugins: Installed plugins, used to route non-quarantine tokens.
 
     Returns:
         Summary of what was restored, skipped and failed.
     """
     out = UndoOutcome()
+    by_id = {c.id: c for c in candidates or []}
     for entry in results:
         token = entry.get("undo_token")
+        restore_error = ""
         if not token:
             if entry.get("success") and entry.get("log") != "dry-run":
                 out.permanent += 1
@@ -269,9 +289,132 @@ def undo_run_results(run_id: str, results: list[dict[str, Any]]) -> UndoOutcome:
             continue
         try:
             restore_from_quarantine(token)
+            out.restored += 1
+            mark_undo_restored(run_id, token)
+            continue
+        except FileNotFoundError as exc:
+            restore_error = str(exc)
+            # Not a (known) quarantine entry: fall through to plugin undo.
+            pass
         except Exception as exc:
             out.failed.append((token, str(exc)))
             continue
-        out.restored += 1
-        mark_undo_restored(run_id, token)
+
+        cid = entry.get("candidate_id", "")
+        candidate = by_id.get(cid)
+        plugin = _plugin_for_token(plugins or [], candidate)
+        if plugin is None:
+            out.failed.append((token, restore_error or "not a quarantined item and no plugin supports its undo"))
+            continue
+        if candidate is not None:
+            removal = plugin.undo(candidate, ctx_for_undo(), token)
+            if removal.success:
+                out.restored += 1
+                mark_undo_restored(run_id, token)
+            else:
+                out.failed.append((token, removal.log))
+        else:
+            out.failed.append((token, "candidate metadata missing for plugin-based undo"))
     return out
+
+
+def undo_run_item(
+    run_id: str,
+    results: list[dict[str, Any]],
+    candidate_id: str,
+    candidates: list[Candidate] | None = None,
+    plugins: list[Plugin] | None = None,
+) -> UndoOutcome:
+    """Restore a single candidate of one run (selective undo).
+
+    Args:
+        run_id: Run identifier (used to record progress).
+        results: Parsed ``results_json`` of the run.
+        candidate_id: Identifier of the candidate to restore.
+        candidates: Candidates of the originating plan (for plugin undo).
+        plugins: Installed plugins (for plugin undo).
+
+    Returns:
+        Summary limited to the selected item.
+
+    Raises:
+        KeyError: When ``candidate_id`` is not part of this run.
+    """
+    entry = next((e for e in results if e.get("candidate_id") == candidate_id), None)
+    if entry is None:
+        raise KeyError(candidate_id)
+    return undo_run_results(run_id, [entry], candidates=candidates, plugins=plugins)
+
+
+def undo_item_ids(run_id: str, db_path: Path | None = None) -> list[dict[str, Any]]:
+    """List the undoable items of a run with their state.
+
+    Args:
+        run_id: Run identifier.
+        db_path: Optional custom database path.
+
+    Returns:
+        One row per candidate of the run: ``candidate_id``, ``category``,
+        ``success``, whether it was quarantined, whether it can be restored
+        and whether it was already restored.
+    """
+    run = get_run(run_id, db_path=db_path)
+    if not run:
+        return []
+    try:
+        results = json.loads(run["results_json"])
+    except (ValueError, TypeError):
+        return []
+    rows: list[dict[str, Any]] = []
+    for entry in results:
+        token = entry.get("undo_token")
+        quarantined = token is not None
+        state = "restored" if entry.get("restored_at") else ("restorable" if token else "permanent")
+        if entry.get("log") == "dry-run":
+            state = "dry-run"
+        if state == "restorable" and token and not _quarantine_has(token):
+            state = "missing"
+        rows.append(
+            {
+                "candidate_id": entry.get("candidate_id"),
+                "category": entry.get("category"),
+                "size_bytes": entry.get("bytes_freed", 0),
+                "state": state,
+            }
+        )
+    _ = quarantined
+    return rows
+
+
+def _quarantine_has(token: str) -> bool:
+    """Return True when the undo token matches a quarantine DB entry."""
+    try:
+        get_quarantine_item(token)
+        return True
+    except Exception:
+        return False
+
+
+def _plugin_for_token(plugins: list[Plugin], candidate: Candidate | None) -> Plugin | None:
+    """Find the plugin that can undo the removal of ``candidate``.
+
+    Prefers the plugin that owns the candidate's category, then any plugin
+    that claims undo support.
+
+    Args:
+        plugins: Installed plugins.
+        candidate: Candidate of the removed item (may be None).
+
+    Returns:
+        A plugin with ``supports_undo()``, or None.
+    """
+    if candidate is not None:
+        owner = next((p for p in plugins if candidate.category in (p.categories or (p.name,))), None)
+        if owner is not None and owner.supports_undo():
+            return owner
+    return None
+
+
+def ctx_for_undo() -> Context:
+    """Build a non-destructive Context for plugin undo operations."""
+    return Context(dry_run=False, config={})

@@ -1,0 +1,62 @@
+---
+title: Saved Audits, Filters & Formats
+description: Reuse audits without rescanning, filter by size/age, and emit machine-readable output.
+---
+
+## Persisted audits
+
+`plan`, `inspect` and `clean` normally re-run the full audit. Save an audit once and reuse it everywhere:
+
+```bash
+bekas audit --save            # stored under its audit id
+bekas audit --save myscan     # stored with an alias too
+
+bekas plan --from-audit last  # newest audit, no rescan
+bekas plan --from-audit myscan
+bekas inspect <id> --from-audit last
+bekas clean --from-audit myscan --apply
+```
+
+`--from-audit` guarantees **no rescan** — the candidates you reviewed are exactly the ones acted on.
+
+## Filters
+
+Filter candidates by size and age, consistently across `audit`, `plan` and `clean`:
+
+```bash
+bekas audit --min-size 500MB --older-than 90d
+bekas plan --min-size 1GB --older-than 1y
+bekas clean --from-audit last --min-size 100MB --apply
+```
+
+Units are human-readable: `500MB`, `1.5GB`, `90d`, `2w`, `1y`. Age filtering never matches candidates without a timestamp — they are never silently included.
+
+## Interactive cleaning
+
+```bash
+bekas clean --interactive
+```
+
+Candidates are grouped by category with size and reason; toggle numbered items per group. A final selection summary is shown **before** the typed confirmation gate, so nothing is removed without two explicit confirmations.
+
+## Plan diff
+
+Compare a freshly computed plan against a saved one:
+
+```bash
+bekas plan --save plan.json
+# ... time passes ...
+bekas plan --diff plan.json
+```
+
+Output lists **Added**, **Removed** and **Changed** candidates (with `old → new` sizes).
+
+## Output formats
+
+```bash
+bekas audit --format csv      # id, category, size_bytes, ...
+bekas audit --format ndjson   # one JSON object per line
+bekas audit --format json     # full report
+```
+
+Every format is aligned with the plain `--json` global flag; `table` keeps the human view.

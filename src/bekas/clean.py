@@ -471,6 +471,74 @@ def apply_plan(
     return run_result
 
 
+def select_interactive(candidates: list[Candidate]) -> list[Candidate]:
+    """Interactively toggle candidates grouped by category.
+
+    Args:
+        candidates: Candidates to choose from (assumed tier-filtered already).
+
+    Returns:
+        The selected candidates, in input order. Empty when the user aborts.
+    """
+    groups = _group_by_category(candidates)
+    selected: set[str] = {c.id for c in candidates}
+    print("\nInteractive selection — [a] toggle all, [Enter] confirm, [q] abort")
+    for cat, items in groups.items():
+        size = sum(c.size_bytes for c in items)
+        print(f"\n{cat} — {len(items)} item(s), {_human_size(size)}")
+        for idx, c in enumerate(items, 1):
+            mark = "x" if c.id in selected else " "
+            print(f"  [{mark}] {idx:3d}. {c.path_or_handle} ({_human_size(c.size_bytes)}) — {c.reason}")
+        raw = input("  Toggle numbers to remove (e.g. 1,3) — nothing = keep current: ").strip()
+        if raw.lower() == "q":
+            return []
+        if raw:
+            toggled_ids: set[str] = set()
+            for part in raw.replace(" ", "").split(","):
+                if not part:
+                    continue
+                try:
+                    n = int(part)
+                except ValueError:
+                    continue
+                if 1 <= n <= len(items):
+                    toggled_ids.add(items[n - 1].id)
+            for cid in toggled_ids:
+                if cid in selected:
+                    selected.discard(cid)
+                else:
+                    selected.add(cid)
+
+    picked = [c for c in candidates if c.id in selected]
+    total = sum(c.size_bytes for c in picked)
+    print(f"\nSelected: {len(picked)} item(s), {_human_size(total)}")
+    return picked
+
+
+def diff_plans(old: Plan, new: Plan) -> dict[str, list[Candidate]]:
+    """Compare two plans candidate-wise.
+
+    Args:
+        old: The previously saved plan.
+        new: The freshly computed plan.
+
+    Returns:
+        Dict with keys ``added`` (in new only), ``removed`` (in old only) and
+        ``changed`` (same id, different size or confidence).
+    """
+    by_id_old = {c.id: c for c in old.candidates}
+    by_id_new = {c.id: c for c in new.candidates}
+    added = [c for cid, c in by_id_new.items() if cid not in by_id_old]
+    removed = [c for cid, c in by_id_old.items() if cid not in by_id_new]
+    changed = [
+        new_c
+        for cid, new_c in by_id_new.items()
+        if cid in by_id_old
+        and (new_c.size_bytes != by_id_old[cid].size_bytes or new_c.confidence != by_id_old[cid].confidence)
+    ]
+    return {"added": added, "removed": removed, "changed": changed}
+
+
 def _generic_remove(candidate: Candidate, ctx: Context, quarantine_enabled: bool, run_id: str) -> RemovalResult:
     """Perform generic removal for a candidate without a matching plugin.
 
