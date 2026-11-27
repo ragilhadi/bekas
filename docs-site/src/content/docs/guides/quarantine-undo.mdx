@@ -33,8 +33,22 @@ bekas history --json
 ```bash
 bekas undo                      # most recent run
 bekas undo <run_id>
+bekas undo <run_id> --list      # per-item state: restorable/restored/permanent/missing
+bekas undo <run_id> --item <candidate_id>   # restore a single item
 ```
 
-`undo` restores every quarantined item of the run. Items removed permanently (plugins without quarantine support, or runs with quarantine disabled) cannot be restored; `undo` reports how many.
+`undo` restores every quarantined item of the run (or, with `--item`, exactly one). Items removed permanently (plugins without quarantine support, or runs with quarantine disabled) cannot be restored; `undo` reports how many. `--list` shows each item's state with its category and size.
 
 Undo is safe to repeat: items restored by an earlier `undo` of the same run are reported as already restored and left alone. If an item cannot be restored (for example its quarantined data was purged, or something now exists at the original path) `undo` and `quarantine restore` print the reason and exit with status 1. Moves into and out of quarantine across filesystems copy first, so a failure never leaves a half-written copy and the original is only removed after the copy is complete.
+
+## Undo beyond quarantine
+
+Some plugins can undo non-file removals and say so honestly in `bekas plugins list` (the **Undo** column). The `git.branches` plugin records each branch's commit SHA at discovery when it deletes a branch, `undo` recreates it from that SHA as long as the commit is still reachable in the repository.
+
+## Run reports
+
+```bash
+bekas history <run_id> --report run-report.md
+```
+
+Exports a readable markdown file: every item acted on with its category, size, reason and current undo state, plus summary counts (restored by a later undo, deleted permanently, still restorable).

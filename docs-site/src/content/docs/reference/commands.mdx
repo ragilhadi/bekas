@@ -45,6 +45,8 @@ Global options: `--profile TEXT`, `--json`, `-v/--verbose`.
 
 `bekas doctor [--json] [--skip a,b]`. Checks: Python version, config, quarantine writable, undo DB, Docker, Git, plugins, free disk space, quarantine on the same filesystem. A missing or stopped Docker daemon is a warning, not an error. Exit code is non-zero if any check fails.
 
+With `--fix [--dry-run] [--json]`, repair what is safe to repair — recreate a missing quarantine directory, tighten permissions on the runs DB and lock file, and quarantine an unreadable runs DB (never delete user data). `--dry-run` lists the same actions without changing anything; bekas-owned state only, user files are never touched.
+
 ## bekas tui
 
 Launch the interactive UI.
